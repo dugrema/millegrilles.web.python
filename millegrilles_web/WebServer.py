@@ -3,9 +3,11 @@ import aioredis
 import asyncio
 import logging
 import jwt
+import socketio
 
 import aiohttp_session.redis_storage
 import redis.asyncio
+from socketio.exceptions import ConnectionRefusedError
 
 from aiohttp import web
 from aiohttp.web_request import Request
@@ -35,6 +37,9 @@ class WebServer:
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
         self._redis_session: Optional[aioredis.Redis] = None
+        self._sio = socketio.AsyncServer(async_mode='aiohttp')
+
+        self._semaphore_web_threads = asyncio.BoundedSemaphore(value=10)
 
     def get_nom_app(self) -> str:
         raise NotImplementedError('must implement')
@@ -44,7 +49,11 @@ class WebServer:
         await self._charger_session_handler()
         self._charger_ssl()
 
+        # Wiring socket.io
+        self._sio.attach(self.__app, socketio_path=f'{self.get_nom_app()}/socket.io')
+
         self._preparer_routes()
+        self._preparer_socketio_events()
 
     def _charger_configuration(self, configuration: Optional[dict] = None):
         self.__configuration.parse_config(configuration)
@@ -54,6 +63,10 @@ class WebServer:
             web.get(f'{self.__app_path}/initSession', self.handle_init_session),
             web.get(f'{self.__app_path}/info.json', self.handle_info_session)
         ])
+
+    def _preparer_socketio_events(self):
+        self._sio.on("connect", handler=self.sio_connect)
+        self._sio.on("disconnect", handler=self.sio_disconnect)
 
     def _charger_ssl(self):
         self.__ssl_context = SSLContext()
@@ -163,28 +176,47 @@ class WebServer:
         return claims
 
     async def handle_init_session(self, request: Request):
+        async with self._semaphore_web_threads:
+            try:
+                user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+                user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+            except KeyError:
+                return web.HTTPUnauthorized()
 
-        try:
-            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
-            user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
-        except KeyError:
-            return web.HTTPUnauthorized()
+            # session = await aiohttp_session.get_session(request)
 
-        # session = await aiohttp_session.get_session(request)
-
-        return web.HTTPOk()
+            return web.HTTPOk()
 
     async def handle_info_session(self, request: Request):
+        async with self._semaphore_web_threads:
+            try:
+                user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+                user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+            except KeyError:
+                return web.HTTPUnauthorized()
 
+            data = {
+                'nomUsager': user_name,
+                'userId': user_id,
+            }
+
+            return web.json_response(data)
+
+    async def sio_connect(self, sid, environ):
+        self.__logger.debug("connect %s", sid)
         try:
-            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+            request = environ.get('aiohttp.request')
             user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
         except KeyError:
-            return web.HTTPUnauthorized()
+            self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
+            raise ConnectionRefusedError('authentication failed')
 
-        data = {
-            'nomUsager': user_name,
-            'userId': user_id,
-        }
+        async with self._sio.session(sid) as session:
+            session['user_name'] = user_name
+            session['user_id'] = user_id
 
-        return web.json_response(data)
+        return True
+
+    async def sio_disconnect(self, sid):
+        self.__logger.debug("disconnect %s", sid)
