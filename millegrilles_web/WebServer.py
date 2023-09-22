@@ -1,11 +1,15 @@
+import aiohttp_session.redis_storage
+import aioredis
 import asyncio
 import logging
 import jwt
 import pathlib
 import re
 
+import redis.asyncio
 from aiohttp import web
 from aiohttp.web_request import Request
+from aiohttp_session import new_session
 from asyncio import Event
 from asyncio.exceptions import TimeoutError
 from ssl import SSLContext
@@ -29,11 +33,14 @@ class WebServer:
         self.__stop_event: Optional[Event] = None
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
+        self._redis_session: Optional[aioredis.Redis] = None
 
-    def setup(self, configuration: Optional[dict] = None):
+    async def setup(self, configuration: Optional[dict] = None):
         self._charger_configuration(configuration)
-        self._preparer_routes()
+        await self._charger_session_handler()
         self._charger_ssl()
+
+        self._preparer_routes()
 
     def _charger_configuration(self, configuration: Optional[dict] = None):
         self.__configuration.parse_config(configuration)
@@ -46,6 +53,43 @@ class WebServer:
         self.__logger.debug("Charger certificat %s" % self.__configuration.web_cert_pem_path)
         self.__ssl_context.load_cert_chain(self.__configuration.web_cert_pem_path,
                                            self.__configuration.web_key_pem_path)
+
+    async def _charger_session_handler(self):
+        configuration_app = self.__etat.configuration
+        redis_hostname = configuration_app.redis_hostname
+        redis_port = configuration_app.redis_port
+        redis_username = configuration_app.redis_username
+        redis_password = configuration_app.redis_password
+        key_path = configuration_app.key_pem_path
+        cert_path = configuration_app.cert_pem_path
+        ca_path = configuration_app.ca_pem_path
+        redis_database = configuration_app.redis_session_db
+
+        url_redis = f"rediss://{redis_hostname}:{redis_port}"
+
+        self.__logger.info("Connexion a redis pour session web : %s" % url_redis)
+
+        redis_session = await redis.asyncio.from_url(
+            url_redis, db=redis_database, username=redis_username, password=redis_password,
+            ssl_keyfile=key_path, ssl_certfile=cert_path, ssl_ca_certs=ca_path,
+            ssl_cert_reqs="required", ssl_check_hostname=True,
+        )
+
+        await redis_session.ping()
+
+        if isinstance(redis_session, redis.asyncio.Redis):
+            pass
+
+        storage = aiohttp_session.redis_storage.RedisStorage(
+            redis_session, cookie_name='WebServer',
+            max_age=1800,
+            secure=True, httponly=True
+        )
+
+        # Wiring de la session dans webapp
+        aiohttp_session.setup(self.__app, storage)
+
+        pass
 
     async def entretien(self):
         self.__logger.debug('Entretien web')

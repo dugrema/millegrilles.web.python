@@ -8,6 +8,11 @@ from millegrilles_messages.MilleGrillesConnecteur import Configuration as Config
 
 CONST_WEBAPP_PARAMS = [
     Constantes.ENV_DIR_STAGING,
+    Constantes.PARAM_REDIS_HOSTNAME,
+    Constantes.PARAM_REDIS_PORT,
+    Constantes.PARAM_REDIS_USERNAME,
+    Constantes.PARAM_REDIS_PASSWORD_PATH,
+    Constantes.PARAM_REDIS_SESSION_DATABASE,
 ]
 
 CONST_WEB_PARAMS = [
@@ -23,6 +28,11 @@ class ConfigurationApplicationWeb(ConfigurationAbstract):
     def __init__(self):
         super().__init__()
         self.__dir_staging: Optional[str] = None
+        self.redis_hostname = 'redis'
+        self.redis_port = 6379
+        self.redis_username = Constantes.REDIS_USERNAME_DEFAULT
+        self.redis_password: Optional[str] = None
+        self.redis_session_db = Constantes.REDIS_SESSION_DATABASE
 
     def get_params_list(self) -> list:
         params = super().get_params_list()
@@ -39,6 +49,17 @@ class ConfigurationApplicationWeb(ConfigurationAbstract):
 
         # Params optionnels
         self.__dir_staging = dict_params.get(Constantes.ENV_DIR_STAGING)
+
+        self.redis_hostname = dict_params.get(Constantes.PARAM_REDIS_HOSTNAME) or self.redis_hostname
+        self.redis_port = int(dict_params.get(Constantes.PARAM_REDIS_PORT) or self.redis_port)
+        self.redis_username = dict_params.get(Constantes.PARAM_REDIS_USERNAME) or self.redis_username
+        redis_password_path = dict_params.get(Constantes.PARAM_REDIS_PASSWORD_PATH)
+        if redis_password_path:
+            with open(redis_password_path, 'r') as fichier:
+                for line in fichier:
+                    self.redis_password = line
+                    break
+        self.redis_session_db = int(dict_params.get(Constantes.PARAM_REDIS_SESSION_DATABASE) or self.redis_session_db)
 
     @property
     def dir_staging(self):
