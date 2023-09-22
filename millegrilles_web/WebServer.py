@@ -1,15 +1,14 @@
-import aiohttp_session.redis_storage
+import aiohttp_session
 import aioredis
 import asyncio
 import logging
 import jwt
-import pathlib
-import re
 
+import aiohttp_session.redis_storage
 import redis.asyncio
+
 from aiohttp import web
 from aiohttp.web_request import Request
-from aiohttp_session import new_session
 from asyncio import Event
 from asyncio.exceptions import TimeoutError
 from ssl import SSLContext
@@ -17,6 +16,7 @@ from typing import Optional, Union
 
 from millegrilles_messages.messages import Constantes
 
+from millegrilles_web import Constantes as ConstantesWeb
 from millegrilles_web.Configuration import ConfigurationWeb
 from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web.Commandes import CommandHandler
@@ -24,8 +24,9 @@ from millegrilles_web.Commandes import CommandHandler
 
 class WebServer:
 
-    def __init__(self, etat: EtatWeb, commandes: CommandHandler):
+    def __init__(self, app_path: str, etat: EtatWeb, commandes: CommandHandler):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
+        self.__app_path = app_path
         self.__etat = etat
         self.__commandes = commandes
 
@@ -34,6 +35,9 @@ class WebServer:
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
         self._redis_session: Optional[aioredis.Redis] = None
+
+    def get_nom_app(self) -> str:
+        raise NotImplementedError('must implement')
 
     async def setup(self, configuration: Optional[dict] = None):
         self._charger_configuration(configuration)
@@ -46,7 +50,10 @@ class WebServer:
         self.__configuration.parse_config(configuration)
 
     def _preparer_routes(self):
-        raise NotImplementedError('must implement')
+        self.__app.add_routes([
+            web.get(f'{self.__app_path}/initSession', self.handle_init_session),
+            web.get(f'{self.__app_path}/info.json', self.handle_info_session)
+        ])
 
     def _charger_ssl(self):
         self.__ssl_context = SSLContext()
@@ -81,15 +88,13 @@ class WebServer:
             pass
 
         storage = aiohttp_session.redis_storage.RedisStorage(
-            redis_session, cookie_name='WebServer',
+            redis_session, cookie_name=self.get_nom_app() + '.web.sid',
             max_age=1800,
             secure=True, httponly=True
         )
 
         # Wiring de la session dans webapp
         aiohttp_session.setup(self.__app, storage)
-
-        pass
 
     async def entretien(self):
         self.__logger.debug('Entretien web')
@@ -156,3 +161,30 @@ class WebServer:
             return False
 
         return claims
+
+    async def handle_init_session(self, request: Request):
+
+        try:
+            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+            user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+        except KeyError:
+            return web.HTTPUnauthorized()
+
+        # session = await aiohttp_session.get_session(request)
+
+        return web.HTTPOk()
+
+    async def handle_info_session(self, request: Request):
+
+        try:
+            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+            user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+        except KeyError:
+            return web.HTTPUnauthorized()
+
+        data = {
+            'nomUsager': user_name,
+            'userId': user_id,
+        }
+
+        return web.json_response(data)
