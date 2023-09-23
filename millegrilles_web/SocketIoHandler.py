@@ -6,6 +6,9 @@ import logging
 import secrets
 import socketio
 
+from certvalidator.errors import PathValidationError
+from cryptography.exceptions import InvalidSignature
+
 from millegrilles_messages.messages import Constantes
 
 from millegrilles_web.EtatWeb import EtatWeb
@@ -130,7 +133,11 @@ class SocketIoHandler:
         contenu = json.loads(message['contenu'])
 
         # Valider message (params)
-        enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
+        try:
+            enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
+        except (PathValidationError, InvalidSignature):
+            self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
+            return {'ok': False, 'err': 'Certificat ou signature message invalides'}
         nom_usager = enveloppe.subject_common_name
         user_id = enveloppe.get_user_id
 
@@ -162,7 +169,7 @@ class SocketIoHandler:
         self.__logger.debug("upgrade Authentification reussie, upgrade events")
         await self._upgrade_socketio_events()
 
-        return {'protege': True, 'userName': user_name_session}
+        return {'ok': True, 'protege': True, 'userName': user_name_session}
 
     async def unsubscribe(self, sid: str, environ: dict):
         raise NotImplementedError('todo')
