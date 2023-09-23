@@ -22,6 +22,7 @@ from millegrilles_web import Constantes as ConstantesWeb
 from millegrilles_web.Configuration import ConfigurationWeb
 from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web.Commandes import CommandHandler
+from millegrilles_web.SocketIoHandler import SocketIoHandler
 
 
 class WebServer:
@@ -29,17 +30,25 @@ class WebServer:
     def __init__(self, app_path: str, etat: EtatWeb, commandes: CommandHandler):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self.__app_path = app_path
-        self.__etat = etat
+        self._etat = etat
         self.__commandes = commandes
 
-        self.__app = web.Application()
+        self._app = web.Application()
         self.__stop_event: Optional[Event] = None
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
         self._redis_session: Optional[aioredis.Redis] = None
-        self._sio = socketio.AsyncServer(async_mode='aiohttp')
+        self._socket_io_handler: Optional[SocketIoHandler] = None
 
         self._semaphore_web_threads = asyncio.BoundedSemaphore(value=10)
+
+    @property
+    def app(self):
+        return self._app
+
+    @property
+    def etat(self):
+        return self._etat
 
     def get_nom_app(self) -> str:
         raise NotImplementedError('must implement')
@@ -48,25 +57,27 @@ class WebServer:
         self._charger_configuration(configuration)
         await self._charger_session_handler()
         self._charger_ssl()
+        await self.setup_socketio()
+        await self._preparer_routes()
 
-        # Wiring socket.io
-        self._sio.attach(self.__app, socketio_path=f'{self.get_nom_app()}/socket.io')
-
-        self._preparer_routes()
-        self._preparer_socketio_events()
+    async def setup_socketio(self):
+        """ Wiring socket.io """
+        # Utiliser la bonne instance de SocketIoHandler dans une sous-classe
+        # self._socket_io_handler = SocketIoHandler(self.__app, self.__etat)
+        raise NotImplementedError('must implement')
 
     def _charger_configuration(self, configuration: Optional[dict] = None):
         self.__configuration.parse_config(configuration)
 
-    def _preparer_routes(self):
-        self.__app.add_routes([
+    async def _preparer_routes(self):
+        self._app.add_routes([
             web.get(f'{self.__app_path}/initSession', self.handle_init_session),
             web.get(f'{self.__app_path}/info.json', self.handle_info_session)
         ])
 
-    def _preparer_socketio_events(self):
-        self._sio.on("connect", handler=self.sio_connect)
-        self._sio.on("disconnect", handler=self.sio_disconnect)
+    # def _preparer_socketio_events(self):
+    #     self._sio.on("connect", handler=self.sio_connect)
+    #     self._sio.on("disconnect", handler=self.sio_disconnect)
 
     def _charger_ssl(self):
         self.__ssl_context = SSLContext()
@@ -75,7 +86,7 @@ class WebServer:
                                            self.__configuration.web_key_pem_path)
 
     async def _charger_session_handler(self):
-        configuration_app = self.__etat.configuration
+        configuration_app = self._etat.configuration
         redis_hostname = configuration_app.redis_hostname
         redis_port = configuration_app.redis_port
         redis_username = configuration_app.redis_username
@@ -95,19 +106,17 @@ class WebServer:
             ssl_cert_reqs="required", ssl_check_hostname=True,
         )
 
+        # Verifier connexion a redis - raise erreur si echec
         await redis_session.ping()
 
-        if isinstance(redis_session, redis.asyncio.Redis):
-            pass
-
         storage = aiohttp_session.redis_storage.RedisStorage(
-            redis_session, cookie_name=self.get_nom_app() + '.web.sid',
+            redis_session, cookie_name=self.get_nom_app() + '.aiohttp',
             max_age=1800,
             secure=True, httponly=True
         )
 
         # Wiring de la session dans webapp
-        aiohttp_session.setup(self.__app, storage)
+        aiohttp_session.setup(self._app, storage)
 
     async def entretien(self):
         self.__logger.debug('Entretien web')
@@ -118,7 +127,7 @@ class WebServer:
         else:
             self.__stop_event = Event()
 
-        runner = web.AppRunner(self.__app)
+        runner = web.AppRunner(self._app)
         await runner.setup()
 
         # Configuration du site avec SSL
@@ -139,41 +148,41 @@ class WebServer:
             self.__logger.info("Site arrete")
             await runner.cleanup()
 
-    async def verifier_token_jwt(self, token: str, fuuid: str) -> Union[bool, dict]:
-        # Recuperer kid, charger certificat pour validation
-        header = jwt.get_unverified_header(token)
-        fingerprint = header['kid']
-        enveloppe = await self.__etat.charger_certificat(fingerprint)
-
-        domaines = enveloppe.get_domaines
-        if 'GrosFichiers' in domaines or 'Messagerie' in domaines:
-            pass  # OK
-        else:
-            # Certificat n'est pas autorise a signer des streams
-            self.__logger.warning("Certificat de mauvais domaine pour JWT (doit etre GrosFichiers,Messagerie)")
-            return False
-
-        exchanges = enveloppe.get_exchanges
-        if Constantes.SECURITE_SECURE not in exchanges:
-            # Certificat n'est pas autorise a signer des streams
-            self.__logger.warning("Certificat de mauvais niveau de securite pour JWT (doit etre 4.secure)")
-            return False
-
-        public_key = enveloppe.get_public_key()
-
-        try:
-            claims = jwt.decode(token, public_key, algorithms=['EdDSA'])
-        except jwt.exceptions.InvalidSignatureError:
-            # Signature invalide
-            return False
-
-        self.__logger.debug("JWT claims pour %s = %s" % (fuuid, claims))
-
-        if claims['sub'] != fuuid:
-            # JWT pour le mauvais fuuid
-            return False
-
-        return claims
+    # async def verifier_token_jwt(self, token: str, fuuid: str) -> Union[bool, dict]:
+    #     # Recuperer kid, charger certificat pour validation
+    #     header = jwt.get_unverified_header(token)
+    #     fingerprint = header['kid']
+    #     enveloppe = await self.__etat.charger_certificat(fingerprint)
+    #
+    #     domaines = enveloppe.get_domaines
+    #     if 'GrosFichiers' in domaines or 'Messagerie' in domaines:
+    #         pass  # OK
+    #     else:
+    #         # Certificat n'est pas autorise a signer des streams
+    #         self.__logger.warning("Certificat de mauvais domaine pour JWT (doit etre GrosFichiers,Messagerie)")
+    #         return False
+    #
+    #     exchanges = enveloppe.get_exchanges
+    #     if Constantes.SECURITE_SECURE not in exchanges:
+    #         # Certificat n'est pas autorise a signer des streams
+    #         self.__logger.warning("Certificat de mauvais niveau de securite pour JWT (doit etre 4.secure)")
+    #         return False
+    #
+    #     public_key = enveloppe.get_public_key()
+    #
+    #     try:
+    #         claims = jwt.decode(token, public_key, algorithms=['EdDSA'])
+    #     except jwt.exceptions.InvalidSignatureError:
+    #         # Signature invalide
+    #         return False
+    #
+    #     self.__logger.debug("JWT claims pour %s = %s" % (fuuid, claims))
+    #
+    #     if claims['sub'] != fuuid:
+    #         # JWT pour le mauvais fuuid
+    #         return False
+    #
+    #     return claims
 
     async def handle_init_session(self, request: Request):
         async with self._semaphore_web_threads:
@@ -202,21 +211,21 @@ class WebServer:
 
             return web.json_response(data)
 
-    async def sio_connect(self, sid, environ):
-        self.__logger.debug("connect %s", sid)
-        try:
-            request = environ.get('aiohttp.request')
-            user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
-            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
-        except KeyError:
-            self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
-            raise ConnectionRefusedError('authentication failed')
-
-        async with self._sio.session(sid) as session:
-            session['user_name'] = user_name
-            session['user_id'] = user_id
-
-        return True
-
-    async def sio_disconnect(self, sid):
-        self.__logger.debug("disconnect %s", sid)
+    # async def sio_connect(self, sid, environ):
+    #     self.__logger.debug("connect %s", sid)
+    #     try:
+    #         request = environ.get('aiohttp.request')
+    #         user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+    #         user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+    #     except KeyError:
+    #         self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
+    #         raise ConnectionRefusedError('authentication failed')
+    #
+    #     async with self._sio.session(sid) as session:
+    #         session['user_name'] = user_name
+    #         session['user_id'] = user_id
+    #
+    #     return True
+    #
+    # async def sio_disconnect(self, sid):
+    #     self.__logger.debug("disconnect %s", sid)
