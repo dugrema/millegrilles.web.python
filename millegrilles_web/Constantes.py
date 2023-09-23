@@ -27,3 +27,5 @@ HEADER_USER_NAME = 'X-User-Name'
 SESSION_USER_NAME = 'user_name'
 SESSION_USER_ID = 'user_id'
 SESSION_CHALLENGE_CERTIFICAT = 'challenge_certificat'
+SESSION_AUTH_VERIFIE = 'auth_verifie'
+

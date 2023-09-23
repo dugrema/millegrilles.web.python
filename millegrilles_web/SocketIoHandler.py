@@ -6,6 +6,8 @@ import logging
 import secrets
 import socketio
 
+from typing import Optional
+
 from certvalidator.errors import PathValidationError
 from cryptography.exceptions import InvalidSignature
 
@@ -49,9 +51,6 @@ class SocketIoHandler:
         # Obsolete
         self._sio.on('upgradeProtege', handler=self.not_implemented_handler)
         self._sio.on('downgradePrive', handler=self.not_implemented_handler)
-
-    async def _upgrade_socketio_events(self):
-        pass
 
     async def run(self):
         await asyncio.gather(
@@ -166,12 +165,19 @@ class SocketIoHandler:
                 self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
                 return {'ok': False, 'err': 'Session ou challenge non initialise'}
 
+            session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
+
         self.__logger.debug("upgrade Authentification reussie, upgrade events")
-        await self._upgrade_socketio_events()
 
         return {'ok': True, 'protege': True, 'userName': user_name_session}
 
-    async def unsubscribe(self, sid: str, environ: dict):
+    async def subscribe(self, sid: str, params: dict):
+        async with self._sio.session(sid) as session:
+            if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
+                return {'ok': False, 'err': 'Non authentifie'}
+        raise NotImplementedError('todo')
+
+    async def unsubscribe(self, sid: str, params: dict):
         raise NotImplementedError('todo')
 
     async def generer_challenge_certificat(self, sid: str):
@@ -202,3 +208,48 @@ class SocketIoHandler:
         }
 
         return reponse
+
+    @property
+    def exchange_default(self):
+        raise NotImplementedError('must implement')
+
+    async def executer_requete(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None):
+        return await self.__executer_message('requete', sid, requete, exchange, producer)
+
+    async def executer_commande(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None):
+        return await self.__executer_message('requete', sid, requete, exchange, producer)
+
+    async def __executer_message(self, type_message: str, sid: str, message: dict, exchange: Optional[str] = None, producer=None):
+        # Valider le message avant de le transmettre
+        enveloppe = await self.etat.validateur_message.verifier(message)
+
+        async with self._sio.session(sid) as session:
+            if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
+                return {'ok': False, 'err': 'Non authentifie'}
+            if enveloppe.get_user_id != session[ConstantesWeb.SESSION_USER_ID]:
+                return {'ok': False, 'err': 'Mismatch user_id'}
+
+        if exchange is None:
+            exchange = self.exchange_default
+
+        if producer is None:
+            producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+
+        routage = message['routage']
+        action = routage['action']
+        domaine = routage['domaine']
+        partition = routage.get('partition')
+
+        if type_message == 'requete':
+            reponse = await producer.executer_requete(message, domaine=domaine, action=action, partition=partition,
+                                                      exchange=exchange)
+        elif type_message == 'commande':
+            reponse = await producer.executer_commande(message, domaine=domaine, action=action, partition=partition,
+                                                       exchange=exchange)
+        else:
+            raise ValueError('Type de message non supporte : %s' % type_message)
+        # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
+
+        parsed = reponse.parsed
+        del parsed['__original']
+        return parsed
