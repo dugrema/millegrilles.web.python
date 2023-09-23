@@ -6,16 +6,18 @@ import logging
 import secrets
 import socketio
 
-from typing import Optional
+from typing import Optional, Union
 
 from certvalidator.errors import PathValidationError
 from cryptography.exceptions import InvalidSignature
 
 from millegrilles_messages.messages import Constantes
+from millegrilles_messages.messages.EnveloppeCertificat import EnveloppeCertificat
 
 from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web import Constantes as ConstantesWeb
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
+from millegrilles_web.SocketIoSubscriptions import SocketIoSubscriptions
 
 
 class SocketIoHandler:
@@ -25,6 +27,8 @@ class SocketIoHandler:
         self._server = server
         self._stop_event = stop_event
         self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect)
+
+        self.__subscription_handler = SocketIoSubscriptions(self, self._stop_event)
 
         self.__certificats_maitredescles = dict()
 
@@ -40,7 +44,8 @@ class SocketIoHandler:
         self._sio.on('connect', handler=self.connect)
         self._sio.on('disconnect', handler=self.disconnect)
 
-        self._sio.on('unsubscribe', handler=self.unsubscribe)
+        # self._sio.on('subscribe', handler=self.subscribe)
+        # self._sio.on('unsubscribe', handler=self.unsubscribe)
         self._sio.on('genererChallengeCertificat', handler=self.generer_challenge_certificat)
         self._sio.on('getCertificatsMaitredescles', handler=self.get_certificats_maitredescles)
         self._sio.on('getInfoIdmg', handler=self.get_info_idmg)
@@ -54,7 +59,8 @@ class SocketIoHandler:
 
     async def run(self):
         await asyncio.gather(
-            self.entretien_maitredescles()
+            self.entretien_maitredescles(),
+            self.__subscription_handler.run(),
         )
 
     async def entretien_maitredescles(self):
@@ -105,6 +111,22 @@ class SocketIoHandler:
                 'pem': pem,
                 'date_reception': datetime.datetime.utcnow(),
             }
+
+    async def authentifier_message(self, session: dict, message: dict,
+                                   enveloppe: Optional[EnveloppeCertificat]) -> EnveloppeCertificat:
+
+        if enveloppe is None:
+            # Valider le message avant de le transmettre
+            enveloppe = await self.etat.validateur_message.verifier(message)
+        else:
+            pass  # OK, assumer que le message a deja ete valide
+
+        if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
+            raise ErreurAuthentificationMessage('Session non authentifiee')
+        if enveloppe.get_user_id != session[ConstantesWeb.SESSION_USER_ID]:
+            raise ErreurAuthentificationMessage('Mismatch userId')
+
+        return enveloppe
 
     async def connect(self, sid: str, environ: dict):
         self.__logger.debug("connect %s", sid)
@@ -171,14 +193,29 @@ class SocketIoHandler:
 
         return {'ok': True, 'protege': True, 'userName': user_name_session}
 
-    async def subscribe(self, sid: str, params: dict):
+    async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
         async with self._sio.session(sid) as session:
-            if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
-                return {'ok': False, 'err': 'Non authentifie'}
-        raise NotImplementedError('todo')
+            try:
+                enveloppe = await self.authentifier_message(session, message, enveloppe)
+            except ErreurAuthentificationMessage as e:
+                return {'ok': False, 'err': str(e)}
 
-    async def unsubscribe(self, sid: str, params: dict):
-        raise NotImplementedError('todo')
+        try:
+            await self.__subscription_handler.subscribe(sid, routing_keys, exchanges)
+        except Exception:
+            self.__logger.exception("subscribe Erreur subscribe")
+            return {'ok': False}
+
+        return {'ok': True}
+
+    async def unsubscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+        try:
+            await self.__subscription_handler.unsubscribe(sid, routing_keys, exchanges)
+        except Exception:
+            self.__logger.exception("subscribe Erreur unsubscribe")
+            return {'ok': False}
+
+        return {'ok': True}
 
     async def generer_challenge_certificat(self, sid: str):
         challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
@@ -213,21 +250,20 @@ class SocketIoHandler:
     def exchange_default(self):
         raise NotImplementedError('must implement')
 
-    async def executer_requete(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None):
-        return await self.__executer_message('requete', sid, requete, exchange, producer)
+    async def executer_requete(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None, enveloppe=None):
+        return await self.__executer_message('requete', sid, requete, exchange, producer, enveloppe)
 
-    async def executer_commande(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None):
-        return await self.__executer_message('requete', sid, requete, exchange, producer)
+    async def executer_commande(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None, enveloppe=None):
+        return await self.__executer_message('requete', sid, requete, exchange, producer, enveloppe)
 
-    async def __executer_message(self, type_message: str, sid: str, message: dict, exchange: Optional[str] = None, producer=None):
-        # Valider le message avant de le transmettre
-        enveloppe = await self.etat.validateur_message.verifier(message)
+    async def __executer_message(self, type_message: str, sid: str, message: dict, exchange: Optional[str] = None,
+                                 producer=None, enveloppe=None):
 
         async with self._sio.session(sid) as session:
-            if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
-                return {'ok': False, 'err': 'Non authentifie'}
-            if enveloppe.get_user_id != session[ConstantesWeb.SESSION_USER_ID]:
-                return {'ok': False, 'err': 'Mismatch user_id'}
+            try:
+                enveloppe = self.authentifier_message(session, message, enveloppe)
+            except ErreurAuthentificationMessage as e:
+                return {'ok': False, 'err': str(e)}
 
         if exchange is None:
             exchange = self.exchange_default
@@ -253,3 +289,7 @@ class SocketIoHandler:
         parsed = reponse.parsed
         del parsed['__original']
         return parsed
+
+
+class ErreurAuthentificationMessage(Exception):
+    pass
