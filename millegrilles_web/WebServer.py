@@ -33,8 +33,9 @@ class WebServer:
         self._etat = etat
         self.__commandes = commandes
 
+        self._stop_event: Optional[Event] = None
+
         self._app = web.Application()
-        self.__stop_event: Optional[Event] = None
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
         self._redis_session: Optional[aioredis.Redis] = None
@@ -50,10 +51,19 @@ class WebServer:
     def etat(self):
         return self._etat
 
+    @property
+    def socket_io_handler(self):
+        return self._socket_io_handler
+
     def get_nom_app(self) -> str:
         raise NotImplementedError('must implement')
 
-    async def setup(self, configuration: Optional[dict] = None):
+    async def setup(self, configuration: Optional[dict] = None, stop_event: Optional[asyncio.Event] = None):
+        if stop_event is not None:
+            self._stop_event = stop_event
+        else:
+            self._stop_event = asyncio.Event()
+
         self._charger_configuration(configuration)
         await self._charger_session_handler()
         self._charger_ssl()
@@ -119,14 +129,22 @@ class WebServer:
         aiohttp_session.setup(self._app, storage)
 
     async def entretien(self):
-        self.__logger.debug('Entretien web')
+        while self._stop_event.is_set() is False:
+            self.__logger.debug('Entretien web')
 
-    async def run(self, stop_event: Optional[Event] = None):
-        if stop_event is not None:
-            self.__stop_event = stop_event
-        else:
-            self.__stop_event = Event()
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                pass  # OK
 
+    async def run(self):
+        await asyncio.gather(
+            self.__run_web_server(),
+            self.entretien(),
+            self._socket_io_handler.run(),
+        )
+
+    async def __run_web_server(self):
         runner = web.AppRunner(self._app)
         await runner.setup()
 
@@ -138,12 +156,13 @@ class WebServer:
             await site.start()
             self.__logger.info("Site demarre")
 
-            while not self.__stop_event.is_set():
-                await self.entretien()
-                try:
-                    await asyncio.wait_for(self.__stop_event.wait(), 30)
-                except TimeoutError:
-                    pass
+            await self._stop_event.wait()
+            # while not self._stop_event.is_set():
+            #     await self.entretien()
+            #     try:
+            #         await asyncio.wait_for(self._stop_event.wait(), 30)
+            #     except TimeoutError:
+            #         pass
         finally:
             self.__logger.info("Site arrete")
             await runner.cleanup()

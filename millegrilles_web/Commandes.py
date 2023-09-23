@@ -4,39 +4,56 @@ import pytz
 
 from cryptography.x509.extensions import ExtensionNotFound
 
-from millegrilles_messages.messages import Constantes as ConstantesMilleGrilles
-from millegrilles_messages.messages.MessagesModule import MessageWrapper
+from millegrilles_messages.messages import Constantes
 from millegrilles_messages.MilleGrillesConnecteur import EtatInstance
 from millegrilles_messages.messages.MessagesThread import MessagesThread
-from millegrilles_messages.messages.MessagesModule import MessageProducerFormatteur
+from millegrilles_messages.messages.MessagesModule import MessageProducerFormatteur, MessageWrapper, RessourcesConsommation
 from millegrilles_messages.MilleGrillesConnecteur import CommandHandler as CommandesAbstract
 
 from millegrilles_web.Intake import IntakeFichiers
-from millegrilles_web import Constantes
+from millegrilles_web import Constantes as  ConstantesWeb
+from millegrilles_web.SocketIoHandler import SocketIoHandler
 
 
 class CommandHandler(CommandesAbstract):
 
-    def __init__(self, etat_instance: EtatInstance, intake: IntakeFichiers):
+    def __init__(self, web_app):
         super().__init__()
+        self.__web_app = web_app
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
-        self.__etat_instance = etat_instance
-        self.__intake = intake
         self.__messages_thread = None
+
+    @property
+    def etat(self):
+        return self.__web_app.etat
+
+    @property
+    def intake_fichiers(self) -> IntakeFichiers:
+        return self.__web_app.intake_fichiers
+
+    @property
+    def socket_io_handler(self) -> SocketIoHandler:
+        return self.__web_app.socket_io_handler
 
     def get_routing_keys(self):
         return [
-            f'evenement.{Constantes.DOMAINE_GROSFICHIERS}.{Constantes.EVENEMENT_GROSFICHIERS_CHANGEMENT_CONSIGNATION_PRIMAIRE}',
-            'evenement.CoreTopologie.changementConsignation',
+            # f'evenement.{Constantes.DOMAINE_GROSFICHIERS}.{Constantes.EVENEMENT_GROSFICHIERS_CHANGEMENT_CONSIGNATION_PRIMAIRE}',
+            # 'evenement.CoreTopologie.changementConsignation',
         ]
 
     def configurer_consumers(self, messages_thread: MessagesThread):
         self.__messages_thread = messages_thread
 
+        res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
+        res_evenements.ajouter_rk(
+            Constantes.SECURITE_PUBLIC,
+            f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
+
         # res_streaming = RessourcesConsommation(self.callback_reply_q,
         #                                        nom_queue='streaming/volatil', channel_separe=True, est_asyncio=True)
         # res_streaming.ajouter_rk(ConstantesMilleGrilles.SECURITE_PRIVE, 'commande.backup.backupTransactions')
-        # messages_thread.ajouter_consumer(res_streaming)
+
+        messages_thread.ajouter_consumer(res_evenements)
 
     async def traiter_commande(self, producer: MessageProducerFormatteur, message: MessageWrapper):
         routing_key = message.routing_key
@@ -65,9 +82,13 @@ class CommandHandler(CommandesAbstract):
         except ExtensionNotFound:
             delegation_globale = None
 
-        if type_message == 'commande':
-            if ConstantesMilleGrilles.SECURITE_PRIVE in exchanges:
-                pass
+        if type_message == 'evenement':
+            if exchange == Constantes.SECURITE_PUBLIC:
+                if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
+                    await self.socket_io_handler.recevoir_certificat_maitredescles(message)
+                    return False
+
+        self.__logger.warning("Message non gere : %s sur exchange %s " % (routing_key, exchange))
 
         return False  # Empeche de transmettre un message de reponse
 

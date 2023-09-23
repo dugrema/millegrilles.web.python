@@ -45,7 +45,7 @@ class WebAppMain:
             self.__logger.info("Activation de la reception de fichiers")
             self.__intake_fichiers = IntakeFichiers(self._stop_event, self.__etat)
 
-        self._commandes_handler = CommandHandler(self.__etat, self.__intake_fichiers)
+        self._commandes_handler = CommandHandler(self)
         self._rabbitmq_dao = MilleGrillesConnecteur(self._stop_event, self.__etat, self._commandes_handler)
 
         if self.args.fichiers:
@@ -55,14 +55,14 @@ class WebAppMain:
 
     async def configurer_web_server(self):
         self._web_server = WebServer(self.__etat, self._commandes_handler)
-        self._web_server.setup()
+        await self._web_server.setup(stop_event=self._stop_event)
 
     async def run(self):
 
         threads = [
             self._rabbitmq_dao.run(),
             self.__etat.run(self._stop_event, self._rabbitmq_dao),
-            self._web_server.run(self._stop_event),
+            self._web_server.run(),
         ]
 
         if self.__intake_fichiers:
@@ -87,6 +87,14 @@ class WebAppMain:
     @property
     def etat(self):
         return self.__etat
+
+    @property
+    def intake_fichiers(self):
+        return self.__intake_fichiers
+
+    @property
+    def socket_io_handler(self):
+        return self._web_server.socket_io_handler
 
     def parse(self) -> argparse.Namespace:
         parser = argparse.ArgumentParser(description="Demarrer le serveur d'applications web pour MilleGrilles")

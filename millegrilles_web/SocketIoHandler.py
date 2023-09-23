@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import datetime
 import json
@@ -9,14 +10,18 @@ from millegrilles_messages.messages import Constantes
 
 from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web import Constantes as ConstantesWeb
+from millegrilles_messages.messages.MessagesModule import MessageWrapper
 
 
 class SocketIoHandler:
 
-    def __init__(self, server, always_connect=False):
+    def __init__(self, server, stop_event: asyncio.Event, always_connect=False):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._server = server
+        self._stop_event = stop_event
         self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect)
+
+        self.__certificats_maitredescles = dict()
 
     @property
     def etat(self) -> EtatWeb:
@@ -44,6 +49,51 @@ class SocketIoHandler:
 
     async def _upgrade_socketio_events(self):
         pass
+
+    async def run(self):
+        await asyncio.gather(
+            self.entretien_maitredescles()
+        )
+
+    async def entretien_maitredescles(self):
+        while self._stop_event.is_set() is False:
+
+            # Charger le certificat de maitre des cles
+            if len(self.__certificats_maitredescles) == 0:
+                self.__logger.debug("Tenter de charger au moins un certificat de maitre des cles")
+                try:
+                    await self.charger_maitredescles()
+                except Exception:
+                    self.__logger.exception('Erreur chargement certificat de maitre des cles')
+
+            try:
+                await asyncio.wait_for(self._stop_event.wait(), timeout=300)
+            except asyncio.TimeoutError:
+                pass  # OK
+
+    async def charger_maitredescles(self):
+        try:
+            producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=10)
+        except asyncio.TimeoutError:
+            # MQ non disponible, abort
+            return
+
+        requete = dict()
+        action = 'certMaitreDesCles'
+        domaine = Constantes.DOMAINE_MAITRE_DES_CLES
+        reponse = await producer.executer_requete(requete, domaine=domaine, action=action,
+                                                  exchange=Constantes.SECURITE_PUBLIC)
+        await self.recevoir_certificat_maitredescles(reponse)
+
+    async def recevoir_certificat_maitredescles(self, message: MessageWrapper):
+        certificat = message.certificat
+        if Constantes.ROLE_MAITRE_DES_CLES in certificat.get_roles:
+            fingerprint = certificat.fingerprint
+            pem = certificat.chaine_pem()
+            self.__certificats_maitredescles[fingerprint] = {
+                'pem': pem,
+                'date_reception': datetime.datetime.utcnow(),
+            }
 
     async def connect(self, sid: str, environ: dict):
         self.__logger.debug("connect %s", sid)
@@ -124,8 +174,10 @@ class SocketIoHandler:
             session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = challenge
         return {'challengeCertificat': challenge}
 
-    async def get_certificats_maitredescles(self, sid: str, environ: dict):
-        raise NotImplementedError('todo')
+    async def get_certificats_maitredescles(self, sid: str):
+        pems = [p['pem'] for p in self.__certificats_maitredescles.values()]
+
+        return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
         async with self._sio.session(sid) as session:
