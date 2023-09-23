@@ -36,6 +36,10 @@ class SocketIoHandler:
     def etat(self) -> EtatWeb:
         return self._server.etat
 
+    @property
+    def subscription_handler(self) -> SocketIoSubscriptions:
+        return self.__subscription_handler
+
     async def setup(self):
         self._sio.attach(self._server.app, socketio_path=f'{self._server.get_nom_app()}/socket.io')
         await self._preparer_socketio_events()
@@ -146,6 +150,7 @@ class SocketIoHandler:
 
     async def disconnect(self, sid: str):
         self.__logger.debug("disconnect %s", sid)
+        await self.subscription_handler.disconnect(sid)
 
     async def not_implemented_handler(self, sid: str, environ: dict):
         raise NotImplementedError('not implemented')
@@ -158,13 +163,15 @@ class SocketIoHandler:
             enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
         except (PathValidationError, InvalidSignature):
             self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
-            return {'ok': False, 'err': 'Certificat ou signature message invalides'}
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})
         nom_usager = enveloppe.subject_common_name
         user_id = enveloppe.get_user_id
 
         if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
             self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
-            return {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"}
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})
 
         # Comparer contenu a l'information dans la session
         async with self._sio.session(sid) as session:
@@ -174,48 +181,50 @@ class SocketIoHandler:
 
             if user_name_session is None or user_id_session is None or challenge is None:
                 self.__logger.warning("upgrade Session ou challenge non initialise pour SID %s - REFUSE" % sid)
-                return {'ok': False, 'err': 'Session ou challenge non initialise'}
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})
 
             if user_name_session != nom_usager or user_id_session != user_id:
                 self.__logger.warning("upgrade Mismatch userid/username entre session et certificat pour SID %s - REFUSE" % sid)
-                return {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'}
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})
 
             if challenge['data'] == contenu['data'] and challenge['date'] == contenu['date']:
                 # Retirer le challenge pour eviter reutilisation
                 session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = None
             else:
                 self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
-                return {'ok': False, 'err': 'Session ou challenge non initialise'}
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})
 
             session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
 
         self.__logger.debug("upgrade Authentification reussie, upgrade events")
 
-        return {'ok': True, 'protege': True, 'userName': user_name_session}
+        return self.etat.formatteur_message.signer_message(
+            Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
             except ErreurAuthentificationMessage as e:
-                return {'ok': False, 'err': str(e)}
+                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})
 
         try:
-            await self.__subscription_handler.subscribe(sid, routing_keys, exchanges)
+            return await self.__subscription_handler.subscribe(sid, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur subscribe")
-            return {'ok': False}
-
-        return {'ok': True}
+            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})
 
     async def unsubscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         try:
             await self.__subscription_handler.unsubscribe(sid, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur unsubscribe")
-            return {'ok': False}
+            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})
 
-        return {'ok': True}
+        return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})
 
     async def generer_challenge_certificat(self, sid: str):
         challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
@@ -261,7 +270,7 @@ class SocketIoHandler:
 
         async with self._sio.session(sid) as session:
             try:
-                enveloppe = self.authentifier_message(session, message, enveloppe)
+                enveloppe = await self.authentifier_message(session, message, enveloppe)
             except ErreurAuthentificationMessage as e:
                 return {'ok': False, 'err': str(e)}
 
@@ -289,6 +298,19 @@ class SocketIoHandler:
         parsed = reponse.parsed
         del parsed['__original']
         return parsed
+
+    def ajouter_sid_room(self, sid: str, room: str):
+        return self._sio.enter_room(sid, room)
+
+    def retirer_sid_room(self, sid: str, room: str):
+        return self._sio.leave_room(sid, room)
+
+    async def emettre_message_room(self, event: str, data: dict, room: str):
+        return await self._sio.emit(event, data, room=room)
+
+    @property
+    def rooms(self):
+        return self._sio.manager.rooms
 
 
 class ErreurAuthentificationMessage(Exception):

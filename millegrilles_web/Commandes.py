@@ -49,11 +49,18 @@ class CommandHandler(CommandesAbstract):
             Constantes.SECURITE_PUBLIC,
             f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
 
+        res_subscriptions = RessourcesConsommation(
+            self.socket_io_handler.subscription_handler.callback_reply_q,
+            channel_separe=True, est_asyncio=True)
+        self.socket_io_handler.subscription_handler.messages_thread = messages_thread
+        self.socket_io_handler.subscription_handler.ressources_consommation = res_subscriptions
+
         # res_streaming = RessourcesConsommation(self.callback_reply_q,
         #                                        nom_queue='streaming/volatil', channel_separe=True, est_asyncio=True)
         # res_streaming.ajouter_rk(ConstantesMilleGrilles.SECURITE_PRIVE, 'commande.backup.backupTransactions')
 
         messages_thread.ajouter_consumer(res_evenements)
+        messages_thread.ajouter_consumer(res_subscriptions)
 
     async def traiter_commande(self, producer: MessageProducerFormatteur, message: MessageWrapper):
         routing_key = message.routing_key
