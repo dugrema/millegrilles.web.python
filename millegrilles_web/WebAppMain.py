@@ -54,8 +54,7 @@ class WebAppMain:
         await self.configurer_web_server()
 
     async def configurer_web_server(self):
-        self._web_server = WebServer(self.__etat, self._commandes_handler)
-        await self._web_server.setup(stop_event=self._stop_event)
+        raise NotImplementedError('must implement')
 
     async def run(self):
 

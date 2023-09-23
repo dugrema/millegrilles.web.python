@@ -118,12 +118,6 @@ class SocketIoHandler:
         raise NotImplementedError('not implemented')
 
     async def upgrade(self, sid: str, message: dict):
-        #   const nomUsager = params.nomUsager,
-        #         fingerprintPk = params.fingerprintPk,
-        #         fingerprintCourant = params.fingerprintCourant,
-        #         // hostname = params.hostname,
-        #         genererChallenge = params.genererChallenge || false
-
         contenu = json.loads(message['contenu'])
 
         # Valider message (params)
@@ -176,7 +170,6 @@ class SocketIoHandler:
 
     async def get_certificats_maitredescles(self, sid: str):
         pems = [p['pem'] for p in self.__certificats_maitredescles.values()]
-
         return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
