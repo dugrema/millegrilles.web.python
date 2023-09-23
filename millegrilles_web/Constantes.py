@@ -23,3 +23,7 @@ REDIS_SESSION_DATABASE = 2
 
 HEADER_USER_ID = 'X-User-Id'
 HEADER_USER_NAME = 'X-User-Name'
+
+SESSION_USER_NAME = 'user_name'
+SESSION_USER_ID = 'user_id'
+SESSION_CHALLENGE_CERTIFICAT = 'challenge_certificat'
