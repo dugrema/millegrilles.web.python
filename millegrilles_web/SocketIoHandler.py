@@ -65,9 +65,18 @@ class SocketIoHandler:
                     await self.charger_maitredescles()
                 except Exception:
                     self.__logger.exception('Erreur chargement certificat de maitre des cles')
+            else:
+                # Retirer les certificats expires
+                expiration = datetime.datetime.utcnow() - datetime.timedelta(minutes=30)
+                fingerprints_expires = list()
+                for key, value in self.__certificats_maitredescles.items():
+                    if value['date_reception'] < expiration:
+                        fingerprints_expires.append(key)
+                for fp in fingerprints_expires:
+                    del self.__certificats_maitredescles[fp]
 
             try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=300)
+                await asyncio.wait_for(self._stop_event.wait(), timeout=5)
             except asyncio.TimeoutError:
                 pass  # OK
 
