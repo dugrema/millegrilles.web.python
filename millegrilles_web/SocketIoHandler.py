@@ -300,8 +300,8 @@ class SocketIoHandler:
         if action != action_verif or domaine != domaine_verif:
             return self.etat.formatteur_message.signer_message(
                 Constantes.KIND_REPONSE,
-                {'ok': False, 'err': 'Routage mismatch (doit etre domaine %s action %s)' % (domaine_verif, action_verif)}[0]
-            )
+                {'ok': False, 'err': 'Routage mismatch (doit etre domaine %s action %s)' % (domaine_verif, action_verif)}
+            )[0]
 
         if type_message == 'requete':
             reponse = await producer.executer_requete(message, domaine=domaine, action=action, partition=partition,
