@@ -123,7 +123,9 @@ class SocketIoSubscriptions:
             'message': message.parsed['__original']
         }
         exchange = message.exchange
+
         nom_evenement = f'{type_evenement}.{domaine}.{action}'
+        nom_evenement_all_domaines = f'{type_evenement}.*.{action}'
 
         # Toujours emettre pour listeners partition __NONE__
         rooms = [
@@ -131,14 +133,20 @@ class SocketIoSubscriptions:
             f'{exchange}/{type_evenement}.__ALL__.__NONE__.{action}',
         ]
 
-        if partition is not None:
+        if partition != '__NONE__':
             # Aussi emettre sur la room de la partition et combinaisons (* domaines et partitions)
             rooms.append(f'{exchange}/{type_evenement}.{domaine}.{partition}.{action}')
             rooms.append(f'{exchange}/{type_evenement}.__ALL__.{partition}.{action}')
             rooms.append(f'{exchange}/{type_evenement}.{domaine}.__ALL__.{action}')
 
         for nom_room in rooms:
-            await self.__sio_handler.emettre_message_room(nom_evenement, message_room, nom_room)
+            exchange_room, routing_room = nom_room.split('/')
+            type_message_room, domaine_room, partition_room, action_room = routing_room.split('.')
+            if domaine_room == '__ALL__':
+                nom_evenement_room = nom_evenement_all_domaines
+            else:
+                nom_evenement_room = nom_evenement
+            await self.__sio_handler.emettre_message_room(nom_evenement_room, message_room, nom_room)
 
     async def ajouter_rk(self, routing_key: str, exchange: str):
         """ Ajouter une routing_key sur la Q du consumer dans MQ """
