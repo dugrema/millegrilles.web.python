@@ -79,10 +79,26 @@ class WebServer:
     def _charger_configuration(self, configuration: Optional[dict] = None):
         self.__configuration.parse_config(configuration)
 
+    async def on_prepare_caching(self, request, response):
+        path_request = request.path
+        if path_request.startswith(f'/{self.get_nom_app()}/static'):
+            response.headers.add('Cache-Control', 'public, max-age=86400, immutable')
+        elif path_request.endswith('.css') or path_request.endswith('.json') or path_request.endswith('.ico'):
+            response.headers.add('Cache-Control', 'public, max-age=600')
+
+    async def serve_index_html(self, request: Request):
+        headers = {'Cache-Control': 'public, max-age=600'}
+        return web.FileResponse(f'static/{self.get_nom_app()}/index.html', headers=headers)
+
     async def _preparer_routes(self):
+        self._app.on_response_prepare.append(self.on_prepare_caching)
+        nom_app = self.get_nom_app()
         self._app.add_routes([
             web.get(f'{self.__app_path}/initSession', self.handle_init_session),
-            web.get(f'{self.__app_path}/info.json', self.handle_info_session)
+            web.get(f'{self.__app_path}/info.json', self.handle_info_session),
+            web.get(f'/{nom_app}', self.serve_index_html),
+            web.get(f'/{nom_app}/', self.serve_index_html),
+            web.static(f'/{nom_app}', path=f'static/{nom_app}', name='react', append_version=True),
         ])
 
     # def _preparer_socketio_events(self):
