@@ -164,14 +164,14 @@ class SocketIoHandler:
         except (PathValidationError, InvalidSignature):
             self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
             return self.etat.formatteur_message.signer_message(
-                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})[0]
         nom_usager = enveloppe.subject_common_name
         user_id = enveloppe.get_user_id
 
         if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
             self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
             return self.etat.formatteur_message.signer_message(
-                Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})
+                Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})[0]
 
         # Comparer contenu a l'information dans la session
         async with self._sio.session(sid) as session:
@@ -182,12 +182,12 @@ class SocketIoHandler:
             if user_name_session is None or user_id_session is None or challenge is None:
                 self.__logger.warning("upgrade Session ou challenge non initialise pour SID %s - REFUSE" % sid)
                 return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
 
             if user_name_session != nom_usager or user_id_session != user_id:
                 self.__logger.warning("upgrade Mismatch userid/username entre session et certificat pour SID %s - REFUSE" % sid)
                 return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})[0]
 
             if challenge['data'] == contenu['data'] and challenge['date'] == contenu['date']:
                 # Retirer le challenge pour eviter reutilisation
@@ -195,36 +195,36 @@ class SocketIoHandler:
             else:
                 self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
                 return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
 
             session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
 
         self.__logger.debug("upgrade Authentification reussie, upgrade events")
 
         return self.etat.formatteur_message.signer_message(
-            Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})
+            Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
             except ErreurAuthentificationMessage as e:
-                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})
+                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
 
         try:
             return await self.__subscription_handler.subscribe(sid, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur subscribe")
-            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})
+            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
 
     async def unsubscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         try:
             await self.__subscription_handler.unsubscribe(sid, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur unsubscribe")
-            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})
+            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
 
-        return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})
+        return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})[0]
 
     async def generer_challenge_certificat(self, sid: str):
         challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
@@ -259,20 +259,32 @@ class SocketIoHandler:
     def exchange_default(self):
         raise NotImplementedError('must implement')
 
-    async def executer_requete(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None, enveloppe=None):
-        return await self.__executer_message('requete', sid, requete, exchange, producer, enveloppe)
+    async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
+        return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
-    async def executer_commande(self, sid: str, requete: dict, exchange: Optional[str] = None, producer=None, enveloppe=None):
-        return await self.__executer_message('requete', sid, requete, exchange, producer, enveloppe)
+    async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
+        return await self.__executer_message('requete', sid, commande, domaine, action, exchange, producer, enveloppe)
 
-    async def __executer_message(self, type_message: str, sid: str, message: dict, exchange: Optional[str] = None,
+    async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str, exchange: Optional[str] = None,
                                  producer=None, enveloppe=None):
+        """
+
+        :param type_message:
+        :param sid:
+        :param message:
+        :param domaine: Domaine du message - utilise pour verifier le routage
+        :param action: Action du message - utilise pour verifier le routage
+        :param exchange:
+        :param producer:
+        :param enveloppe:
+        :return:
+        """
 
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
             except ErreurAuthentificationMessage as e:
-                return {'ok': False, 'err': str(e)}
+                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
 
         if exchange is None:
             exchange = self.exchange_default
@@ -284,6 +296,12 @@ class SocketIoHandler:
         action = routage['action']
         domaine = routage['domaine']
         partition = routage.get('partition')
+
+        if action != action_verif or domaine != domaine_verif:
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE,
+                {'ok': False, 'err': 'Routage mismatch (doit etre domaine %s action %s)' % (domaine_verif, action_verif)}[0]
+            )
 
         if type_message == 'requete':
             reponse = await producer.executer_requete(message, domaine=domaine, action=action, partition=partition,

@@ -125,15 +125,19 @@ class SocketIoSubscriptions:
         exchange = message.exchange
         nom_evenement = f'{type_evenement}.{domaine}.{action}'
 
-        # Toujours emettre sur la room avec partition __NONE__
-        nom_room = f'{exchange}/{type_evenement}.{domaine}.__NONE__.{action}'
-        await self.__sio_handler.emettre_message_room(nom_evenement, message_room, nom_room)
+        # Toujours emettre pour listeners partition __NONE__
+        rooms = [
+            f'{exchange}/{type_evenement}.{domaine}.__NONE__.{action}',
+            f'{exchange}/{type_evenement}.__ALL__.__NONE__.{action}',
+        ]
 
         if partition is not None:
-            # Aussi emettre sur la room de la partition et sur partition __ALL__ (*)
-            nom_room = f'{exchange}/{type_evenement}.{domaine}.{partition}.{action}'
-            await self.__sio_handler.emettre_message_room(nom_evenement, message_room, nom_room)
-            nom_room = f'{exchange}/{type_evenement}.{domaine}.__ALL__.{action}'
+            # Aussi emettre sur la room de la partition et combinaisons (* domaines et partitions)
+            rooms.append(f'{exchange}/{type_evenement}.{domaine}.{partition}.{action}')
+            rooms.append(f'{exchange}/{type_evenement}.__ALL__.{partition}.{action}')
+            rooms.append(f'{exchange}/{type_evenement}.{domaine}.__ALL__.{action}')
+
+        for nom_room in rooms:
             await self.__sio_handler.emettre_message_room(nom_evenement, message_room, nom_room)
 
     async def ajouter_rk(self, routing_key: str, exchange: str):
@@ -166,6 +170,9 @@ def get_key_parts(routing_key: str):
         type_message, domaine, partition, action = parts
     else:
         raise ValueError("Type de routing key non supporte : %s" % routing_key)
+
+    if domaine == '*':
+        domaine = '__ALL__'
 
     if partition == '*':
         partition = '__ALL__'
