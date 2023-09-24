@@ -19,7 +19,7 @@ class SocketIoSubscriptions:
         self.__messages_thread: Optional[MessagesThread] = None
         self.__ressources_consommation: Optional[RessourcesConsommation] = None
 
-        self.__rooms = dict()  # room_handle = routing_key
+        self.__rooms = dict()  # { [room_handle]: {exchange, routing_key} }
         self.__semaphore_rooms = asyncio.BoundedSemaphore(value=1)
 
     @property
@@ -105,7 +105,7 @@ class SocketIoSubscriptions:
         await self.ajouter_rk(routing_key, exchange)
         self.__sio_handler.ajouter_sid_room(sid, room_handle)
 
-        # Conserver une reference pour cleanup de la routing key si la room est fermee
+        # Conserver une reference pour cleanup de la routing key dans MQ si la room est fermee
         async with self.__semaphore_rooms:
             self.__rooms[room_handle] = {'exchange': exchange, 'routing_key': routing_key}
 
@@ -137,6 +137,7 @@ class SocketIoSubscriptions:
             await self.__sio_handler.emettre_message_room(nom_evenement, message_room, nom_room)
 
     async def ajouter_rk(self, routing_key: str, exchange: str):
+        """ Ajouter une routing_key sur la Q du consumer dans MQ """
         messages_module = self.__messages_thread.messages_module
         consumers = messages_module.get_consumers()
 
@@ -146,6 +147,7 @@ class SocketIoSubscriptions:
                 consumer.ajouter_routing_key(exchange, routing_key)
 
     async def retirer_rk(self, routing_key: str, exchange: str):
+        """ Retirer une routing_key de la Q du consumer dans MQ """
         messages_module = self.__messages_thread.messages_module
         consumers = messages_module.get_consumers()
 
