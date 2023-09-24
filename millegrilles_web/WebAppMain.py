@@ -45,13 +45,16 @@ class WebAppMain:
             self.__logger.info("Activation de la reception de fichiers")
             self.__intake_fichiers = IntakeFichiers(self._stop_event, self.__etat)
 
-        self._commandes_handler = CommandHandler(self)
+        self._commandes_handler = self.init_command_handler()
         self._rabbitmq_dao = MilleGrillesConnecteur(self._stop_event, self.__etat, self._commandes_handler)
 
         if self.args.fichiers:
             await self.__intake_fichiers.configurer()
 
         await self.configurer_web_server()
+
+    def init_command_handler(self) -> CommandHandler:
+        return CommandHandler(self)
 
     async def configurer_web_server(self):
         raise NotImplementedError('must implement')
