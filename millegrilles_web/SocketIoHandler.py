@@ -314,8 +314,7 @@ class SocketIoHandler:
         # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
 
         parsed = reponse.parsed
-        del parsed['__original']
-        return parsed
+        return parsed['__original']
 
     def ajouter_sid_room(self, sid: str, room: str):
         return self._sio.enter_room(sid, room)
