@@ -13,6 +13,7 @@ from millegrilles_messages.MilleGrillesConnecteur import CommandHandler as Comma
 from millegrilles_web.Intake import IntakeFichiers
 from millegrilles_web import Constantes as  ConstantesWeb
 from millegrilles_web.SocketIoHandler import SocketIoHandler
+from millegrilles_web.EtatWeb import EtatWeb
 
 
 class CommandHandler(CommandesAbstract):
@@ -24,7 +25,7 @@ class CommandHandler(CommandesAbstract):
         self.__messages_thread = None
 
     @property
-    def etat(self):
+    def etat(self) -> EtatWeb:
         return self.__web_app.etat
 
     @property
@@ -44,23 +45,35 @@ class CommandHandler(CommandesAbstract):
     def configurer_consumers(self, messages_thread: MessagesThread):
         self.__messages_thread = messages_thread
 
+        # Creer une Q pour les messages volatils. Utilise le nom du OU dans le certificat.
+        nom_ou = self.etat.clecertificat.enveloppe.subject_organizational_unit_name
+        if nom_ou is not None:
+            nom_queue_ou = f'{nom_ou}/volatil'
+            res_volatil = RessourcesConsommation(self.callback_reply_q, nom_queue=nom_queue_ou, channel_separe=True,
+                                                 est_asyncio=True, durable=True)
+            res_volatil.set_ttl(300000)  # millisecs
+            res_volatil.ajouter_rk(
+                Constantes.SECURITE_PUBLIC,
+                f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
+        else:
+            res_volatil = None
+
         res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
         res_evenements.ajouter_rk(
             Constantes.SECURITE_PUBLIC,
             f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
 
+        # Listener pour les subscriptions. Les routing keys sont gerees par subsbscription_handler dynamiquement.
         res_subscriptions = RessourcesConsommation(
             self.socket_io_handler.subscription_handler.callback_reply_q,
             channel_separe=True, est_asyncio=True)
         self.socket_io_handler.subscription_handler.messages_thread = messages_thread
         self.socket_io_handler.subscription_handler.ressources_consommation = res_subscriptions
 
-        # res_streaming = RessourcesConsommation(self.callback_reply_q,
-        #                                        nom_queue='streaming/volatil', channel_separe=True, est_asyncio=True)
-        # res_streaming.ajouter_rk(ConstantesMilleGrilles.SECURITE_PRIVE, 'commande.backup.backupTransactions')
-
         messages_thread.ajouter_consumer(res_evenements)
         messages_thread.ajouter_consumer(res_subscriptions)
+        if res_volatil:
+            messages_thread.ajouter_consumer(res_volatil)
 
     async def traiter_commande(self, producer: MessageProducerFormatteur, message: MessageWrapper):
         routing_key = message.routing_key
@@ -91,6 +104,9 @@ class CommandHandler(CommandesAbstract):
 
         if type_message == 'evenement':
             if exchange == Constantes.SECURITE_PUBLIC:
+                if action == Constantes.EVENEMENT_CEDULE:
+                    await self.traiter_cedule(producer, message)
+                    return False
                 if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
                     await self.socket_io_handler.recevoir_certificat_maitredescles(message)
                     return False
@@ -110,10 +126,6 @@ class CommandHandler(CommandesAbstract):
         weekday = date_cedule.weekday()
         hour = date_cedule.hour
         minute = date_cedule.minute
-
-        if self.__intake.en_cours or self.__etat_instance.backup_inhibe:
-            # Ignorer le trigger, backup ou restauration en cours
-            return
 
         if weekday == 0 and hour == 4:
             pass
