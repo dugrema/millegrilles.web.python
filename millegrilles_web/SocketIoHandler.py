@@ -263,7 +263,7 @@ class SocketIoHandler:
         return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
     async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
-        return await self.__executer_message('requete', sid, commande, domaine, action, exchange, producer, enveloppe)
+        return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe)
 
     async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str, exchange: Optional[str] = None,
                                  producer=None, enveloppe=None):
@@ -305,10 +305,10 @@ class SocketIoHandler:
 
         if type_message == 'requete':
             reponse = await producer.executer_requete(message, domaine=domaine, action=action, partition=partition,
-                                                      exchange=exchange)
+                                                      exchange=exchange, noformat=True)
         elif type_message == 'commande':
             reponse = await producer.executer_commande(message, domaine=domaine, action=action, partition=partition,
-                                                       exchange=exchange)
+                                                       exchange=exchange, noformat=True)
         else:
             raise ValueError('Type de message non supporte : %s' % type_message)
         # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
