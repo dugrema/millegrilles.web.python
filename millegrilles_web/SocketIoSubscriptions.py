@@ -118,6 +118,7 @@ class SocketIoSubscriptions:
 
         type_evenement, domaine, partition, action = get_key_parts(message.routing_key)
         message_room = {
+            'exchange': message.exchange,
             'routingKey': message.routing_key,
             'message': message.parsed['__original']
         }
