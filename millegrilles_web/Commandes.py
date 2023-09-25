@@ -63,15 +63,17 @@ class CommandHandler(CommandesAbstract):
             Constantes.SECURITE_PUBLIC,
             f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
 
-        # Listener pour les subscriptions. Les routing keys sont gerees par subsbscription_handler dynamiquement.
-        res_subscriptions = RessourcesConsommation(
-            self.socket_io_handler.subscription_handler.callback_reply_q,
-            channel_separe=True, est_asyncio=True)
-        self.socket_io_handler.subscription_handler.messages_thread = messages_thread
-        self.socket_io_handler.subscription_handler.ressources_consommation = res_subscriptions
+        if self.socket_io_handler:
+            # Listener pour les subscriptions. Les routing keys sont gerees par subsbscription_handler dynamiquement.
+            res_subscriptions = RessourcesConsommation(
+                self.socket_io_handler.subscription_handler.callback_reply_q,
+                channel_separe=True, est_asyncio=True)
+            self.socket_io_handler.subscription_handler.messages_thread = messages_thread
+            self.socket_io_handler.subscription_handler.ressources_consommation = res_subscriptions
+
+            messages_thread.ajouter_consumer(res_subscriptions)
 
         messages_thread.ajouter_consumer(res_evenements)
-        messages_thread.ajouter_consumer(res_subscriptions)
         if res_volatil:
             messages_thread.ajouter_consumer(res_volatil)
 

@@ -99,7 +99,7 @@ class WebServer:
             web.get(f'/{nom_app}/', self.serve_index_html),
             self._app.router.add_static(f'/{nom_app}', path=f'static/{nom_app}', name='react', append_version=True)
         else:
-            self.__logger.warning('Repertoire static/ non disponible - mode DEV sans application react')
+            self.__logger.warning('Repertoire static/ non disponible - mode sans application react')
 
     def _charger_ssl(self):
         self.__ssl_context = SSLContext()
@@ -150,11 +150,17 @@ class WebServer:
                 pass  # OK
 
     async def run(self):
-        await asyncio.gather(
+        tasks = [
             self.__run_web_server(),
             self.entretien(),
-            self._socket_io_handler.run(),
-        )
+        ]
+
+        if self._socket_io_handler is not None:
+            tasks.append(self._socket_io_handler.run())
+        else:
+            self.__logger.warning('socket.io non initialise')
+
+        await asyncio.gather(*tasks)
 
     async def __run_web_server(self):
         runner = web.AppRunner(self._app)
