@@ -241,17 +241,18 @@ class SocketIoHandler:
         return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
-        async with self._sio.session(sid) as session:
-            user_name = session[ConstantesWeb.SESSION_USER_NAME]
-            user_id = session[ConstantesWeb.SESSION_USER_ID]
-
         idmg = self.etat.clecertificat.enveloppe.idmg
 
         reponse = {
             'idmg': idmg,
-            'nomUsager': user_name,
-            'userId': user_id,
         }
+
+        async with self._sio.session(sid) as session:
+            try:
+                reponse['nomUsager'] = session[ConstantesWeb.SESSION_USER_NAME]
+                reponse['userId'] = session[ConstantesWeb.SESSION_USER_ID]
+            except KeyError:
+                pass  # OK
 
         return reponse
 
