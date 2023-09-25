@@ -55,15 +55,15 @@ class CommandHandler(CommandesAbstract):
             res_volatil.ajouter_rk(
                 Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
-        else:
-            res_volatil = None
+            messages_thread.ajouter_consumer(res_volatil)
 
         res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
-        res_evenements.ajouter_rk(
-            Constantes.SECURITE_PUBLIC,
-            f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
 
         if self.socket_io_handler:
+            res_evenements.ajouter_rk(
+                Constantes.SECURITE_PUBLIC,
+                f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
+
             # Listener pour les subscriptions. Les routing keys sont gerees par subsbscription_handler dynamiquement.
             res_subscriptions = RessourcesConsommation(
                 self.socket_io_handler.subscription_handler.callback_reply_q,
@@ -73,9 +73,8 @@ class CommandHandler(CommandesAbstract):
 
             messages_thread.ajouter_consumer(res_subscriptions)
 
-        messages_thread.ajouter_consumer(res_evenements)
-        if res_volatil:
-            messages_thread.ajouter_consumer(res_volatil)
+        if res_evenements.rk:
+            messages_thread.ajouter_consumer(res_evenements)
 
     async def traiter_commande(self, producer: MessageProducerFormatteur, message: MessageWrapper):
         routing_key = message.routing_key
