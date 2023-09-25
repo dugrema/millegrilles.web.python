@@ -2,21 +2,16 @@ import aiohttp_session
 import aioredis
 import asyncio
 import logging
-import jwt
-import socketio
+import pathlib
 
 import aiohttp_session.redis_storage
 import redis.asyncio
-from socketio.exceptions import ConnectionRefusedError
 
 from aiohttp import web
 from aiohttp.web_request import Request
 from asyncio import Event
-from asyncio.exceptions import TimeoutError
 from ssl import SSLContext
-from typing import Optional, Union
-
-from millegrilles_messages.messages import Constantes
+from typing import Optional
 
 from millegrilles_web import Constantes as ConstantesWeb
 from millegrilles_web.Configuration import ConfigurationWeb
@@ -73,7 +68,6 @@ class WebServer:
     async def setup_socketio(self):
         """ Wiring socket.io """
         # Utiliser la bonne instance de SocketIoHandler dans une sous-classe
-        # self._socket_io_handler = SocketIoHandler(self.__app, self.__etat)
         raise NotImplementedError('must implement')
 
     def _charger_configuration(self, configuration: Optional[dict] = None):
@@ -96,14 +90,16 @@ class WebServer:
         self._app.add_routes([
             web.get(f'{self.__app_path}/initSession', self.handle_init_session),
             web.get(f'{self.__app_path}/info.json', self.handle_info_session),
-            web.get(f'/{nom_app}', self.serve_index_html),
-            web.get(f'/{nom_app}/', self.serve_index_html),
-            web.static(f'/{nom_app}', path=f'static/{nom_app}', name='react', append_version=True),
         ])
 
-    # def _preparer_socketio_events(self):
-    #     self._sio.on("connect", handler=self.sio_connect)
-    #     self._sio.on("disconnect", handler=self.sio_disconnect)
+        path_static = pathlib.Path('static')
+        if path_static.exists():
+            self._app.router.add_get(f'/{nom_app}', self.serve_index_html)
+            self._app.router.add_get(f'/{nom_app}/', self.serve_index_html)
+            web.get(f'/{nom_app}/', self.serve_index_html),
+            self._app.router.add_static(f'/{nom_app}', path=f'static/{nom_app}', name='react', append_version=True)
+        else:
+            self.__logger.warning('Repertoire static/ non disponible - mode DEV sans application react')
 
     def _charger_ssl(self):
         self.__ssl_context = SSLContext()
@@ -170,54 +166,11 @@ class WebServer:
 
         try:
             await site.start()
-            self.__logger.info("Site demarre")
-
+            self.__logger.info("Site /%s demarre" % self.get_nom_app())
             await self._stop_event.wait()
-            # while not self._stop_event.is_set():
-            #     await self.entretien()
-            #     try:
-            #         await asyncio.wait_for(self._stop_event.wait(), 30)
-            #     except TimeoutError:
-            #         pass
         finally:
-            self.__logger.info("Site arrete")
+            self.__logger.info("Site /%s arrete" % self.get_nom_app())
             await runner.cleanup()
-
-    # async def verifier_token_jwt(self, token: str, fuuid: str) -> Union[bool, dict]:
-    #     # Recuperer kid, charger certificat pour validation
-    #     header = jwt.get_unverified_header(token)
-    #     fingerprint = header['kid']
-    #     enveloppe = await self.__etat.charger_certificat(fingerprint)
-    #
-    #     domaines = enveloppe.get_domaines
-    #     if 'GrosFichiers' in domaines or 'Messagerie' in domaines:
-    #         pass  # OK
-    #     else:
-    #         # Certificat n'est pas autorise a signer des streams
-    #         self.__logger.warning("Certificat de mauvais domaine pour JWT (doit etre GrosFichiers,Messagerie)")
-    #         return False
-    #
-    #     exchanges = enveloppe.get_exchanges
-    #     if Constantes.SECURITE_SECURE not in exchanges:
-    #         # Certificat n'est pas autorise a signer des streams
-    #         self.__logger.warning("Certificat de mauvais niveau de securite pour JWT (doit etre 4.secure)")
-    #         return False
-    #
-    #     public_key = enveloppe.get_public_key()
-    #
-    #     try:
-    #         claims = jwt.decode(token, public_key, algorithms=['EdDSA'])
-    #     except jwt.exceptions.InvalidSignatureError:
-    #         # Signature invalide
-    #         return False
-    #
-    #     self.__logger.debug("JWT claims pour %s = %s" % (fuuid, claims))
-    #
-    #     if claims['sub'] != fuuid:
-    #         # JWT pour le mauvais fuuid
-    #         return False
-    #
-    #     return claims
 
     async def handle_init_session(self, request: Request):
         async with self._semaphore_web_threads:
@@ -226,8 +179,6 @@ class WebServer:
                 user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
             except KeyError:
                 return web.HTTPUnauthorized()
-
-            # session = await aiohttp_session.get_session(request)
 
             return web.HTTPOk()
 
@@ -245,22 +196,3 @@ class WebServer:
             }
 
             return web.json_response(data)
-
-    # async def sio_connect(self, sid, environ):
-    #     self.__logger.debug("connect %s", sid)
-    #     try:
-    #         request = environ.get('aiohttp.request')
-    #         user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
-    #         user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
-    #     except KeyError:
-    #         self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
-    #         raise ConnectionRefusedError('authentication failed')
-    #
-    #     async with self._sio.session(sid) as session:
-    #         session['user_name'] = user_name
-    #         session['user_id'] = user_id
-    #
-    #     return True
-    #
-    # async def sio_disconnect(self, sid):
-    #     self.__logger.debug("disconnect %s", sid)
