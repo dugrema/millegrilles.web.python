@@ -109,9 +109,10 @@ class CommandHandler(CommandesAbstract):
                 if action == Constantes.EVENEMENT_CEDULE:
                     await self.traiter_cedule(producer, message)
                     return False
-                if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
-                    await self.socket_io_handler.recevoir_certificat_maitredescles(message)
-                    return False
+                if self.socket_io_handler:
+                    if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
+                        await self.socket_io_handler.recevoir_certificat_maitredescles(message)
+                        return False
 
         self.__logger.warning("Message non gere : %s sur exchange %s " % (routing_key, exchange))
 
