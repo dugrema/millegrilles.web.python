@@ -155,7 +155,7 @@ class SocketIoSubscriptions:
 
         for consumer in consumers:
             if consumer.q == self.ressources_consommation.q:
-                self.__logger.info("Queue %s : Ajouter rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
+                self.__logger.debug("Queue %s : Ajouter rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
                 consumer.ajouter_routing_key(exchange, routing_key)
 
     async def retirer_rk(self, routing_key: str, exchange: str):
@@ -165,7 +165,7 @@ class SocketIoSubscriptions:
 
         for consumer in consumers:
             if consumer.q == self.ressources_consommation.q:
-                self.__logger.info("Queue %s : Retirer rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
+                self.__logger.debug("Queue %s : Retirer rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
                 consumer.retirer_routing_key(exchange, routing_key)
 
 
