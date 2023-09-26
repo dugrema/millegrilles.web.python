@@ -134,8 +134,13 @@ class SocketIoHandler:
 
     async def connect(self, sid: str, environ: dict):
         self.__logger.debug("connect %s", sid)
+
         try:
             request = environ.get('aiohttp.request')
+
+            for k, v in request.headers.items():
+                self.__logger.debug("connect HEADER %s = %s" % (k, v))
+
             user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
             user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
         except KeyError:
