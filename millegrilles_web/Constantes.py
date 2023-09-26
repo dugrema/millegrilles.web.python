@@ -23,9 +23,11 @@ REDIS_SESSION_DATABASE = 2
 
 HEADER_USER_ID = 'X-User-Id'
 HEADER_USER_NAME = 'X-User-Name'
+HEADER_AUTH = 'X-Auth'
 
 SESSION_USER_NAME = 'user_name'
 SESSION_USER_ID = 'user_id'
 SESSION_CHALLENGE_CERTIFICAT = 'challenge_certificat'
+SESSION_REQUEST_AUTH = 'request_auth'
 SESSION_AUTH_VERIFIE = 'auth_verifie'
 

@@ -125,8 +125,10 @@ class SocketIoHandler:
         else:
             pass  # OK, assumer que le message a deja ete valide
 
+        if session[ConstantesWeb.SESSION_REQUEST_AUTH] != '1':
+            raise ErreurAuthentificationMessage('Session non authentifiee (request)')
         if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
-            raise ErreurAuthentificationMessage('Session non authentifiee')
+            raise ErreurAuthentificationMessage('Session non authentifiee (upgrade)')
         if enveloppe.get_user_id != session[ConstantesWeb.SESSION_USER_ID]:
             raise ErreurAuthentificationMessage('Mismatch userId')
 
@@ -143,6 +145,7 @@ class SocketIoHandler:
 
             user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
             user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+            auth = request.headers[ConstantesWeb.HEADER_AUTH]
         except KeyError:
             self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
             raise ConnectionRefusedError('authentication failed')
@@ -150,6 +153,7 @@ class SocketIoHandler:
         async with self._sio.session(sid) as session:
             session[ConstantesWeb.SESSION_USER_NAME] = user_name
             session[ConstantesWeb.SESSION_USER_ID] = user_id
+            session[ConstantesWeb.SESSION_REQUEST_AUTH] = auth
 
         return True
 
@@ -180,6 +184,10 @@ class SocketIoHandler:
 
         # Comparer contenu a l'information dans la session
         async with self._sio.session(sid) as session:
+            if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
+
             user_name_session = session.get(ConstantesWeb.SESSION_USER_NAME)
             user_id_session = session.get(ConstantesWeb.SESSION_USER_ID)
             challenge = session.get(ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT)
