@@ -53,6 +53,7 @@ class SocketIoHandler:
         self._sio.on('genererChallengeCertificat', handler=self.generer_challenge_certificat)
         self._sio.on('getCertificatsMaitredescles', handler=self.get_certificats_maitredescles)
         self._sio.on('getInfoIdmg', handler=self.get_info_idmg)
+        self._sio.on('getEtatAuth', handler=self.get_info_idmg)
 
         # Options 2.prive - pour usager authentifie  # TODO Ajouter verif authentification "if(authScore > 0)"
         self._sio.on('upgrade', handler=self.upgrade)
@@ -262,10 +263,11 @@ class SocketIoHandler:
 
         async with self._sio.session(sid) as session:
             try:
+                reponse['auth'] = True
                 reponse['nomUsager'] = session[ConstantesWeb.SESSION_USER_NAME]
                 reponse['userId'] = session[ConstantesWeb.SESSION_USER_ID]
             except KeyError:
-                pass  # OK
+                reponse['auth'] = False
 
         return reponse
 
