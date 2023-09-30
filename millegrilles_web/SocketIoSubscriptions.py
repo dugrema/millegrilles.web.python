@@ -70,7 +70,7 @@ class SocketIoSubscriptions:
     async def disconnect(self, sid: str):
         pass
 
-    async def subscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+    async def subscribe(self, sid: str, user_id: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         if isinstance(routing_keys, str):
             routing_keys = [routing_keys]
         if isinstance(exchanges, str):
@@ -80,14 +80,22 @@ class SocketIoSubscriptions:
             for rk in routing_keys:
                 await self.ajouter_sid_a_room(sid, exchange, rk)
 
+        # Filter routing_keys pour retirer les partitions
+        rks_filtrees = set()
+        for rk in routing_keys:
+            split_rk = rk.split('.')
+            rk_sans_partition = '.'.join([split_rk[0], split_rk[1], split_rk[-1]])
+            rks_filtrees.add(rk_sans_partition)
+        rks_filtrees = list(rks_filtrees)
+
         # {ok: true, routingKeys: rkEvents, exchanges, roomParam}
         return {
             'ok': True,
-            'routingKeys': routing_keys, 'exchanges': exchanges,
+            'routingKeys': rks_filtrees, 'exchanges': exchanges,
             'roomParam': None
         }
 
-    async def unsubscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+    async def unsubscribe(self, sid: str, user_id: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         if isinstance(routing_keys, str):
             routing_keys = [routing_keys]
         if isinstance(exchanges, str):

@@ -219,12 +219,15 @@ class SocketIoHandler:
             Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
-        async with self._sio.session(sid) as session:
-            try:
-                enveloppe = await self.authentifier_message(session, message, enveloppe)
-                user_id = enveloppe.get_user_id
-            except ErreurAuthentificationMessage as e:
-                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
+        if enveloppe is not False:
+            async with self._sio.session(sid) as session:
+                try:
+                    enveloppe = await self.authentifier_message(session, message, enveloppe)
+                    user_id = enveloppe.get_user_id
+                except ErreurAuthentificationMessage as e:
+                    return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
+        else:
+            user_id = None
 
         try:
             return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
@@ -237,7 +240,7 @@ class SocketIoHandler:
             try:
                 enveloppe = await self.authentifier_message(session, message)
                 user_id = enveloppe.get_user_id
-            except ErreurAuthentificationMessage:
+            except (KeyError, ErreurAuthentificationMessage):
                 user_id = None
 
         try:
