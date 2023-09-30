@@ -7,6 +7,8 @@ import pathlib
 import aiohttp_session.redis_storage
 import redis.asyncio
 
+from redis.asyncio.client import Redis as RedisClient
+
 from aiohttp import web
 from aiohttp.web_request import Request
 from asyncio import Event
@@ -14,7 +16,7 @@ from ssl import SSLContext
 from typing import Optional
 
 from millegrilles_web import Constantes as ConstantesWeb
-from millegrilles_web.Configuration import ConfigurationWeb
+from millegrilles_web.Configuration import ConfigurationWeb, ConfigurationApplicationWeb
 from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web.Commandes import CommandHandler
 from millegrilles_web.SocketIoHandler import SocketIoHandler
@@ -107,8 +109,8 @@ class WebServer:
         self.__ssl_context.load_cert_chain(self.__configuration.web_cert_pem_path,
                                            self.__configuration.web_key_pem_path)
 
-    async def _charger_session_handler(self):
-        configuration_app = self._etat.configuration
+    async def _connect_redis(self, redis_database: Optional[int] = None) -> RedisClient:
+        configuration_app: ConfigurationApplicationWeb = self._etat.configuration
         redis_hostname = configuration_app.redis_hostname
         redis_port = configuration_app.redis_port
         redis_username = configuration_app.redis_username
@@ -116,17 +118,22 @@ class WebServer:
         key_path = configuration_app.key_pem_path
         cert_path = configuration_app.cert_pem_path
         ca_path = configuration_app.ca_pem_path
-        redis_database = configuration_app.redis_session_db
+        redis_database_val = redis_database or configuration_app.redis_session_db
 
         url_redis = f"rediss://{redis_hostname}:{redis_port}"
 
         self.__logger.info("Connexion a redis pour session web : %s" % url_redis)
 
         redis_session = await redis.asyncio.from_url(
-            url_redis, db=redis_database, username=redis_username, password=redis_password,
+            url_redis, db=redis_database_val, username=redis_username, password=redis_password,
             ssl_keyfile=key_path, ssl_certfile=cert_path, ssl_ca_certs=ca_path,
             ssl_cert_reqs="required", ssl_check_hostname=True,
         )
+
+        return redis_session
+
+    async def _charger_session_handler(self):
+        redis_session = await self._connect_redis()
 
         # Verifier connexion a redis - raise erreur si echec
         await redis_session.ping()
