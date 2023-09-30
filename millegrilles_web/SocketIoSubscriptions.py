@@ -117,6 +117,8 @@ class SocketIoSubscriptions:
         self.__logger.debug("callback_reply_q RabbitMQ nessage recu : %s" % message)
 
         type_evenement, domaine, partition, action = get_key_parts(message.routing_key)
+        user_id = message.routage.get('user_id')
+
         message_room = {
             'exchange': message.exchange,
             'routingKey': message.routing_key,
@@ -133,11 +135,20 @@ class SocketIoSubscriptions:
             f'{exchange}/{type_evenement}.__ALL__.__NONE__.{action}',
         ]
 
+        if user_id:
+            rooms.append(f'{user_id}/{type_evenement}.{domaine}.__NONE__.{action}', )
+            rooms.append(f'{user_id}/{type_evenement}.__ALL__.__NONE__.{action}', )
+
         if partition != '__NONE__':
             # Aussi emettre sur la room de la partition et combinaisons (* domaines et partitions)
             rooms.append(f'{exchange}/{type_evenement}.{domaine}.{partition}.{action}')
             rooms.append(f'{exchange}/{type_evenement}.__ALL__.{partition}.{action}')
             rooms.append(f'{exchange}/{type_evenement}.{domaine}.__ALL__.{action}')
+
+            if user_id:
+                rooms.append(f'{user_id}/{type_evenement}.{domaine}.{partition}.{action}')
+                rooms.append(f'{user_id}/{type_evenement}.__ALL__.{partition}.{action}')
+                rooms.append(f'{user_id}/{type_evenement}.{domaine}.__ALL__.{action}')
 
         for nom_room in rooms:
             exchange_room, routing_room = nom_room.split('/')

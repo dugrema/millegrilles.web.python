@@ -118,7 +118,7 @@ class SocketIoHandler:
             }
 
     async def authentifier_message(self, session: dict, message: dict,
-                                   enveloppe: Optional[EnveloppeCertificat]) -> EnveloppeCertificat:
+                                   enveloppe: Optional[EnveloppeCertificat] = None) -> EnveloppeCertificat:
 
         if enveloppe is None:
             # Valider le message avant de le transmettre
@@ -222,18 +222,26 @@ class SocketIoHandler:
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
+                user_id = enveloppe.get_user_id
             except ErreurAuthentificationMessage as e:
                 return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
 
         try:
-            return await self.__subscription_handler.subscribe(sid, routing_keys, exchanges)
+            return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur subscribe")
             return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
 
-    async def unsubscribe(self, sid: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+    async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+        async with self._sio.session(sid) as session:
+            try:
+                enveloppe = await self.authentifier_message(session, message)
+                user_id = enveloppe.get_user_id
+            except ErreurAuthentificationMessage:
+                user_id = None
+
         try:
-            await self.__subscription_handler.unsubscribe(sid, routing_keys, exchanges)
+            await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
         except Exception:
             self.__logger.exception("subscribe Erreur unsubscribe")
             return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
@@ -344,6 +352,10 @@ class SocketIoHandler:
     @property
     def rooms(self):
         return self._sio.manager.rooms
+
+    # async def traiter_message_userid(self, message: MessageWrapper) -> Union[bool, dict]:
+    #     self.__logger.warning("traiter_message_userid Message user sans handler, DROPPED %s", message.routage)
+    #     return False
 
 
 class ErreurAuthentificationMessage(Exception):
