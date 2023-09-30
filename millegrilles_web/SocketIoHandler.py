@@ -263,9 +263,9 @@ class SocketIoHandler:
 
         async with self._sio.session(sid) as session:
             try:
-                reponse['auth'] = True
                 reponse['nomUsager'] = session[ConstantesWeb.SESSION_USER_NAME]
                 reponse['userId'] = session[ConstantesWeb.SESSION_USER_ID]
+                reponse['auth'] = True
             except KeyError:
                 reponse['auth'] = False
 
