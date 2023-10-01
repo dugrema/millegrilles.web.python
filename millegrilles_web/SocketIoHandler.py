@@ -126,11 +126,11 @@ class SocketIoHandler:
         else:
             pass  # OK, assumer que le message a deja ete valide
 
-        if session[ConstantesWeb.SESSION_REQUEST_AUTH] != '1':
+        if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
             raise ErreurAuthentificationMessage('Session non authentifiee (request)')
-        if session[ConstantesWeb.SESSION_AUTH_VERIFIE] is not True:
+        if session.get(ConstantesWeb.SESSION_AUTH_VERIFIE) is not True:
             raise ErreurAuthentificationMessage('Session non authentifiee (upgrade)')
-        if enveloppe.get_user_id != session[ConstantesWeb.SESSION_USER_ID]:
+        if enveloppe.get_user_id != session.get(ConstantesWeb.SESSION_USER_ID):
             raise ErreurAuthentificationMessage('Mismatch userId')
 
         return enveloppe
