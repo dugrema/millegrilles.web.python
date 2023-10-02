@@ -49,6 +49,10 @@ class WebServer:
         return self._etat
 
     @property
+    def app_path(self):
+        return self.__app_path
+
+    @property
     def socket_io_handler(self):
         return self._socket_io_handler
 

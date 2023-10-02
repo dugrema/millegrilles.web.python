@@ -31,3 +31,10 @@ SESSION_CHALLENGE_CERTIFICAT = 'challenge_certificat'
 SESSION_REQUEST_AUTH = 'request_auth'
 SESSION_AUTH_VERIFIE = 'auth_verifie'
 
+# Middleware d'upload de fichiers
+DIR_STAGING_UPLOAD = 'upload'
+FICHIER_ETAT = 'etat.json'
+FICHIER_TRANSACTION = 'transaction.json'
+FICHIER_CLES = 'cles.json'
+DIR_STAGING_INTAKE = 'intake'
+
