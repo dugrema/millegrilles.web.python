@@ -516,7 +516,7 @@ class ReceptionFichiersMiddleware:
                 producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=0.3)
                 await producer.executer_commande(transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
                                                  action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
-                                                 nowait=True)
+                                                 nowait=True, noformat=True)
             except Exception as e:
                 self.__logger.warning("handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
                                       "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
