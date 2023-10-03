@@ -5,7 +5,6 @@ import errno
 import json
 import logging
 import pathlib
-import tempfile
 import shutil
 
 from aiohttp import web
@@ -14,7 +13,6 @@ from ssl import SSLContext, VerifyMode
 from typing import Optional
 
 from millegrilles_messages.messages import Constantes
-from millegrilles_messages.chiffrage.Mgs4 import CipherMgs4WithSecret
 from millegrilles_messages.messages.Hachage import VerificateurHachage, ErreurHachage
 from millegrilles_messages.jobs.Intake import IntakeHandler
 from millegrilles_web import Constantes as ConstantesWeb
@@ -131,7 +129,7 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
         else:
             raise e
 
-    async with session.post(url_fichier, ssl=ssl_context, headers=headers) as resp:
+    async with session.post(url_fichier, json=contenu, ssl=ssl_context, headers=headers) as resp:
         resp.raise_for_status()
 
 
@@ -510,6 +508,18 @@ class ReceptionFichiersMiddleware:
                 self.__logger.warning('handle_post Erreur ajout fichier %s assemble au intake : %s' % (batch_id, e))
                 shutil.rmtree(path_upload)
                 return web.HTTPServerError()
+
+            # Emettre la transaction en mode 'nouvelleVersion' pour preparer l'entree a l'ecran durant le transfert
+            #         const transaction = JSON.parse(await fsPromises.readFile(entry.fullPath))
+            #         await transmettreCommande(socket, transaction, 'nouvelleVersion', {domaine: 'GrosFichiers'})
+            try:
+                producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=0.3)
+                await producer.executer_commande(transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
+                                                 action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
+                                                 nowait=True)
+            except Exception as e:
+                self.__logger.warning("handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
+                                      "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
 
             return web.HTTPAccepted()
 
