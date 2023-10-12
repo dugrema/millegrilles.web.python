@@ -47,6 +47,7 @@ class WebAppMain:
 
         self._commandes_handler = self.init_command_handler()
         self._rabbitmq_dao = MilleGrillesConnecteur(self._stop_event, self.__etat, self._commandes_handler)
+        self._rabbitmq_dao.nb_reply_correlation_max = self.__config.nb_reply_correlation_max
 
         if self.args.fichiers:
             await self.__intake_fichiers.configurer()

@@ -33,6 +33,7 @@ class ConfigurationApplicationWeb(ConfigurationAbstract):
         self.redis_username = Constantes.REDIS_USERNAME_DEFAULT
         self.redis_password: Optional[str] = None
         self.redis_session_db = Constantes.REDIS_SESSION_DATABASE
+        self.nb_reply_correlation_max = 20
 
     def get_params_list(self) -> list:
         params = super().get_params_list()
