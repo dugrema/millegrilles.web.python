@@ -32,6 +32,11 @@ class SocketIoHandler:
 
         self.__certificats_maitredescles = dict()
 
+        self._semaphore_requetes = asyncio.BoundedSemaphore(value=10)
+        self._semaphore_commandes = asyncio.BoundedSemaphore(value=5)
+        self._semaphore_subscriptions = asyncio.BoundedSemaphore(value=3)
+        self._semaphore_auth = asyncio.BoundedSemaphore(value=3)
+
     @property
     def etat(self) -> EtatWeb:
         return self._server.etat
@@ -138,159 +143,169 @@ class SocketIoHandler:
     async def connect(self, sid: str, environ: dict):
         self.__logger.debug("connect %s", sid)
 
-        try:
-            request = environ.get('aiohttp.request')
+        async with self._semaphore_auth:
+            try:
+                request = environ.get('aiohttp.request')
 
-            for k, v in request.headers.items():
-                self.__logger.debug("connect HEADER %s = %s" % (k, v))
+                for k, v in request.headers.items():
+                    self.__logger.debug("connect HEADER %s = %s" % (k, v))
 
-            user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
-            user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
-            auth = request.headers[ConstantesWeb.HEADER_AUTH]
-        except KeyError:
-            self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
-            raise ConnectionRefusedError('authentication failed')
+                user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
+                user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
+                auth = request.headers[ConstantesWeb.HEADER_AUTH]
+            except KeyError:
+                self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
+                raise ConnectionRefusedError('authentication failed')
 
-        async with self._sio.session(sid) as session:
-            session[ConstantesWeb.SESSION_USER_NAME] = user_name
-            session[ConstantesWeb.SESSION_USER_ID] = user_id
-            session[ConstantesWeb.SESSION_REQUEST_AUTH] = auth
+            async with self._sio.session(sid) as session:
+                session[ConstantesWeb.SESSION_USER_NAME] = user_name
+                session[ConstantesWeb.SESSION_USER_ID] = user_id
+                session[ConstantesWeb.SESSION_REQUEST_AUTH] = auth
 
         return True
 
     async def disconnect(self, sid: str):
         self.__logger.debug("disconnect %s", sid)
-        await self.subscription_handler.disconnect(sid)
+        async with self._semaphore_auth:
+            await self.subscription_handler.disconnect(sid)
 
     async def not_implemented_handler(self, sid: str, environ: dict):
         raise NotImplementedError('not implemented')
 
     async def upgrade(self, sid: str, message: dict):
-        contenu = json.loads(message['contenu'])
+        async with self._semaphore_auth:
+            contenu = json.loads(message['contenu'])
 
-        # Valider message (params)
-        try:
-            enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
-        except (PathValidationError, InvalidSignature):
-            self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
+            # Valider message (params)
+            try:
+                enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
+            except (PathValidationError, InvalidSignature):
+                self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})[0]
+            nom_usager = enveloppe.subject_common_name
+            user_id = enveloppe.get_user_id
+
+            if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
+                self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})[0]
+
+            # Comparer contenu a l'information dans la session
+            async with self._sio.session(sid) as session:
+                if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
+                    return self.etat.formatteur_message.signer_message(
+                        Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
+
+                user_name_session = session.get(ConstantesWeb.SESSION_USER_NAME)
+                user_id_session = session.get(ConstantesWeb.SESSION_USER_ID)
+                challenge = session.get(ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT)
+
+                if user_name_session is None or user_id_session is None or challenge is None:
+                    self.__logger.warning("upgrade Session ou challenge non initialise pour SID %s - REFUSE" % sid)
+                    return self.etat.formatteur_message.signer_message(
+                        Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
+
+                if user_name_session != nom_usager or user_id_session != user_id:
+                    self.__logger.warning("upgrade Mismatch userid/username entre session et certificat pour SID %s - REFUSE" % sid)
+                    return self.etat.formatteur_message.signer_message(
+                        Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})[0]
+
+                if challenge['data'] == contenu['data'] and challenge['date'] == contenu['date']:
+                    # Retirer le challenge pour eviter reutilisation
+                    session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = None
+                else:
+                    self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
+                    return self.etat.formatteur_message.signer_message(
+                        Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
+
+                session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
+
+            self.__logger.debug("upgrade Authentification reussie, upgrade events")
+
             return self.etat.formatteur_message.signer_message(
-                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})[0]
-        nom_usager = enveloppe.subject_common_name
-        user_id = enveloppe.get_user_id
-
-        if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
-            self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
-            return self.etat.formatteur_message.signer_message(
-                Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})[0]
-
-        # Comparer contenu a l'information dans la session
-        async with self._sio.session(sid) as session:
-            if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
-                return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
-
-            user_name_session = session.get(ConstantesWeb.SESSION_USER_NAME)
-            user_id_session = session.get(ConstantesWeb.SESSION_USER_ID)
-            challenge = session.get(ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT)
-
-            if user_name_session is None or user_id_session is None or challenge is None:
-                self.__logger.warning("upgrade Session ou challenge non initialise pour SID %s - REFUSE" % sid)
-                return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
-
-            if user_name_session != nom_usager or user_id_session != user_id:
-                self.__logger.warning("upgrade Mismatch userid/username entre session et certificat pour SID %s - REFUSE" % sid)
-                return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})[0]
-
-            if challenge['data'] == contenu['data'] and challenge['date'] == contenu['date']:
-                # Retirer le challenge pour eviter reutilisation
-                session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = None
-            else:
-                self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
-                return self.etat.formatteur_message.signer_message(
-                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
-
-            session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
-
-        self.__logger.debug("upgrade Authentification reussie, upgrade events")
-
-        return self.etat.formatteur_message.signer_message(
-            Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
+                Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
-        if enveloppe is not False:
-            async with self._sio.session(sid) as session:
-                try:
-                    enveloppe = await self.authentifier_message(session, message, enveloppe)
-                    user_id = enveloppe.get_user_id
-                except ErreurAuthentificationMessage as e:
-                    return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
-        else:
-            user_id = None
-
-        try:
-            return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
-        except Exception:
-            self.__logger.exception("subscribe Erreur subscribe")
-            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
-
-    async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
-        async with self._sio.session(sid) as session:
-            try:
-                enveloppe = await self.authentifier_message(session, message)
-                user_id = enveloppe.get_user_id
-            except (KeyError, ErreurAuthentificationMessage):
+        async with self._semaphore_subscriptions:
+            if enveloppe is not False:
+                async with self._sio.session(sid) as session:
+                    try:
+                        enveloppe = await self.authentifier_message(session, message, enveloppe)
+                        user_id = enveloppe.get_user_id
+                    except ErreurAuthentificationMessage as e:
+                        return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
+            else:
                 user_id = None
 
-        try:
-            await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
-        except Exception:
-            self.__logger.exception("subscribe Erreur unsubscribe")
-            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
+            try:
+                return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
+            except Exception:
+                self.__logger.exception("subscribe Erreur subscribe")
+                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
 
-        return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})[0]
+    async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+        async with self._semaphore_subscriptions:
+            async with self._sio.session(sid) as session:
+                try:
+                    enveloppe = await self.authentifier_message(session, message)
+                    user_id = enveloppe.get_user_id
+                except (KeyError, ErreurAuthentificationMessage):
+                    user_id = None
+
+            try:
+                await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
+            except Exception:
+                self.__logger.exception("subscribe Erreur unsubscribe")
+                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
+
+            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})[0]
 
     async def generer_challenge_certificat(self, sid: str):
-        challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
-        challenge = {
-            'date': int(datetime.datetime.utcnow().timestamp()),
-            'data': challenge_secret
-        }
-        async with self._sio.session(sid) as session:
-            session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = challenge
-        return {'challengeCertificat': challenge}
+        async with self._semaphore_requetes:
+            challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
+            challenge = {
+                'date': int(datetime.datetime.utcnow().timestamp()),
+                'data': challenge_secret
+            }
+            async with self._sio.session(sid) as session:
+                session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = challenge
+            return {'challengeCertificat': challenge}
 
     async def get_certificats_maitredescles(self, sid: str):
-        pems = [p['pem'] for p in self.__certificats_maitredescles.values()]
-        return pems
+        async with self._semaphore_requetes:
+            pems = [p['pem'] for p in self.__certificats_maitredescles.values()]
+            return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
-        idmg = self.etat.clecertificat.enveloppe.idmg
+        async with self._semaphore_requetes:
+            idmg = self.etat.clecertificat.enveloppe.idmg
 
-        reponse = {
-            'idmg': idmg,
-        }
+            reponse = {
+                'idmg': idmg,
+            }
 
-        async with self._sio.session(sid) as session:
-            try:
-                reponse['nomUsager'] = session[ConstantesWeb.SESSION_USER_NAME]
-                reponse['userId'] = session[ConstantesWeb.SESSION_USER_ID]
-                reponse['auth'] = True
-            except KeyError:
-                reponse['auth'] = False
+            async with self._sio.session(sid) as session:
+                try:
+                    reponse['nomUsager'] = session[ConstantesWeb.SESSION_USER_NAME]
+                    reponse['userId'] = session[ConstantesWeb.SESSION_USER_ID]
+                    reponse['auth'] = True
+                except KeyError:
+                    reponse['auth'] = False
 
-        return reponse
+            return reponse
 
     @property
     def exchange_default(self):
         raise NotImplementedError('must implement')
 
     async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
-        return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
+        async with self._semaphore_requetes:
+            return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
     async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
-        return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe)
+        async with self._semaphore_commandes:
+            return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe)
 
     async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str, exchange: Optional[str] = None,
                                  producer=None, enveloppe=None):

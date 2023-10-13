@@ -40,6 +40,9 @@ class WebAppMain:
         self._stop_event = asyncio.Event()
         self.__config.parse_config(self.__args.__dict__)
 
+        # Utiliser override pour la configuration du nombre de correlations en attente
+        self.__config.nb_reply_correlation_max = self.nb_reply_correlation_max
+
         await self.__etat.reload_configuration()
         if self.args.fichiers:
             self.__logger.info("Activation de la reception de fichiers")
@@ -78,6 +81,10 @@ class WebAppMain:
     def exit_gracefully(self, signum=None, frame=None):
         self.__logger.info("Fermer application, signal: %d" % signum)
         self._stop_event.set()
+
+    @property
+    def nb_reply_correlation_max(self):
+        return 20
 
     @property
     def config(self):
