@@ -1,4 +1,4 @@
-FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2023.10.1
+FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2023.10.2
 
 ENV CERT_PEM=/run/secrets/cert.pem \
     KEY_PEM=/run/secrets/key.pem \
@@ -15,7 +15,6 @@ EXPOSE 80 443
 COPY . $BUILD_FOLDER
 
 RUN cd $BUILD_FOLDER && \
-    python3 ./setup.py install && \
-    python3 -m pip install -U pyOpenSSL cryptography
+    python3 ./setup.py install
 
 CMD ["-m", "server", "--verbose"]
