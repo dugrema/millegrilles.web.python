@@ -15,6 +15,7 @@ EXPOSE 80 443
 COPY . $BUILD_FOLDER
 
 RUN cd $BUILD_FOLDER && \
-    python3 ./setup.py install
+    python3 ./setup.py install && \
+    python3 -m pip install -U pyOpenSSL cryptography
 
 CMD ["-m", "server", "--verbose"]
