@@ -51,14 +51,28 @@ class SocketIoSubscriptions:
     async def entretien_rooms(self):
         while self.__stop_event.is_set() is False:
 
-            rooms = self.__sio_handler.rooms
-            namespace_root = rooms.get('/')
+            # rooms = self.__sio_handler.rooms
+            # namespace_root = rooms.get('/')
+            #
+            # if namespace_root is None:
+            #     self.__logger.debug("entretien_rooms namespace root (/) est None")
+            # else:
+            #     self.__logger.debug("entretien_rooms namespace root : %s" % namespace_root)
 
             # Faire entretien des rooms
             async with self.__semaphore_rooms:
                 for room_handle, value in self.__rooms.copy().items():
-                    if namespace_root is None or namespace_root.get(room_handle) is None:
+                    # if namespace_root is None or namespace_root.get(room_handle) is None:
+                    participants = 0
+                    try:
+                        participants_list = self.__sio_handler.get_participants(room_handle)
+                        for p in participants_list:
+                            participants = participants + 1
+                    except TypeError:
+                        participants = 0  # Room n'existe pas
+                    if participants == 0:
                         # Retirer la routing key
+                        self.__logger.info('entretien_rooms Retrait room %s : absente de namespace_root. Params %s' % (room_handle, value))
                         await self.retirer_rk(**value)
                         del self.__rooms[room_handle]
 
@@ -71,6 +85,7 @@ class SocketIoSubscriptions:
         pass
 
     async def subscribe(self, sid: str, user_id: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+        self.__logger.debug('subscribe sid: %s (user_id %s) de %s/%s' % (sid, user_id, exchanges, routing_keys))
         if isinstance(routing_keys, str):
             routing_keys = [routing_keys]
         if isinstance(exchanges, str):
@@ -96,6 +111,7 @@ class SocketIoSubscriptions:
         }
 
     async def unsubscribe(self, sid: str, user_id: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+        self.__logger.debug('unsubscribe sid: %s (user_id %s) de %s/%s' % (sid, user_id, exchanges, routing_keys))
         if isinstance(routing_keys, str):
             routing_keys = [routing_keys]
         if isinstance(exchanges, str):
@@ -111,7 +127,9 @@ class SocketIoSubscriptions:
     async def ajouter_sid_a_room(self, sid: str, exchange: str, routing_key: str):
         room_handle = get_room_handle(exchange, routing_key)
         await self.ajouter_rk(routing_key, exchange)
-        self.__sio_handler.ajouter_sid_room(sid, room_handle)
+        await self.__sio_handler.ajouter_sid_room(sid, room_handle)
+
+        self.__logger.debug("ajouter_sid_a_room Rooms : %s" % self.__sio_handler.rooms)
 
         # Conserver une reference pour cleanup de la routing key dans MQ si la room est fermee
         async with self.__semaphore_rooms:
@@ -119,7 +137,9 @@ class SocketIoSubscriptions:
 
     async def retirer_sid_de_room(self, sid: str, exchange: str, routing_key: str):
         room_handle = get_room_handle(exchange, routing_key)
-        self.__sio_handler.retirer_sid_room(sid, room_handle)
+        await self.__sio_handler.retirer_sid_room(sid, room_handle)
+
+        self.__logger.debug("retirer_sid_de_room Rooms : %s" % self.__sio_handler.rooms)
 
     async def callback_reply_q(self, message: MessageWrapper, module_messages: MessagesThread):
         self.__logger.debug("callback_reply_q RabbitMQ nessage recu : %s" % message)

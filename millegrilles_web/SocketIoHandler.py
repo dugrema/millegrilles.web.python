@@ -358,18 +358,24 @@ class SocketIoHandler:
         parsed = reponse.parsed
         return parsed['__original']
 
-    def ajouter_sid_room(self, sid: str, room: str):
-        return self._sio.enter_room(sid, room)
+    async def ajouter_sid_room(self, sid: str, room: str):
+        self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
+        return await self._sio.enter_room(sid, room)
 
-    def retirer_sid_room(self, sid: str, room: str):
-        return self._sio.leave_room(sid, room)
+    async def retirer_sid_room(self, sid: str, room: str):
+        self.__logger.debug("Retrait sid %s de room %s" % (sid, room))
+        return await self._sio.leave_room(sid, room)
 
     async def emettre_message_room(self, event: str, data: dict, room: str):
         return await self._sio.emit(event, data, room=room)
 
     @property
     def rooms(self):
+        # return self._sio.manager.rooms
         return self._sio.manager.rooms
+
+    def get_participants(self, room: str):
+        return self._sio.manager.get_participants('/', room)
 
     # async def traiter_message_userid(self, message: MessageWrapper) -> Union[bool, dict]:
     #     self.__logger.warning("traiter_message_userid Message user sans handler, DROPPED %s", message.routage)
