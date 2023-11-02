@@ -240,9 +240,11 @@ class SocketIoHandler:
 
             try:
                 return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
+                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)[0]
             except Exception:
                 self.__logger.exception("subscribe Erreur subscribe")
-                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
+                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
+                return {'ok': False}
 
     async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         async with self._semaphore_subscriptions:
@@ -254,12 +256,12 @@ class SocketIoHandler:
                     user_id = None
 
             try:
-                await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
+                return await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
+                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)[0]
             except Exception:
                 self.__logger.exception("subscribe Erreur unsubscribe")
-                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
-
-            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': True})[0]
+                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
+                return {'ok': False}
 
     async def generer_challenge_certificat(self, sid: str):
         async with self._semaphore_requetes:

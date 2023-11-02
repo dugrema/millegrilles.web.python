@@ -121,8 +121,16 @@ class SocketIoSubscriptions:
             for rk in routing_keys:
                 await self.retirer_sid_de_room(sid, exchange, rk)
 
+        # Filter routing_keys pour retirer les partitions
+        rks_filtrees = set()
+        for rk in routing_keys:
+            split_rk = rk.split('.')
+            rk_sans_partition = '.'.join([split_rk[0], split_rk[1], split_rk[-1]])
+            rks_filtrees.add(rk_sans_partition)
+        rks_filtrees = list(rks_filtrees)
+
         # {ok: true, routingKeys: rkEvents, exchanges}
-        return {'ok': True, 'routingKeys': routing_keys, 'exchanges': exchanges}
+        return {'ok': True, 'routingKeys': rks_filtrees, 'exchanges': exchanges}
 
     async def ajouter_sid_a_room(self, sid: str, exchange: str, routing_key: str):
         room_handle = get_room_handle(exchange, routing_key)
