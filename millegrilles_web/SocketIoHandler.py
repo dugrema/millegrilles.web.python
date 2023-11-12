@@ -202,6 +202,9 @@ class SocketIoHandler:
             nom_usager = enveloppe.subject_common_name
             user_id = enveloppe.get_user_id
 
+            # Associer toutes les connexions d'un meme usager a un room. Permet de faire un evict.
+            await self._sio.enter_room(sid, 'user.%s' % user_id)
+
             if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
                 self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
                 return self.etat.formatteur_message.signer_message(
