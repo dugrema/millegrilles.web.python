@@ -55,9 +55,6 @@ class CommandHandler(CommandesAbstract):
             res_volatil.ajouter_rk(
                 Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
-            res_volatil.ajouter_rk(
-                Constantes.SECURITE_PUBLIC,
-                f'evenement.{Constantes.DOMAINE_CORE_MAITREDESCOMPTES}.{Constantes.EVENEMENT_EVICT_USAGER}', )
             messages_thread.ajouter_consumer(res_volatil)
 
         res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
@@ -66,6 +63,10 @@ class CommandHandler(CommandesAbstract):
             res_evenements.ajouter_rk(
                 Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_MAITRE_DES_CLES}.{Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT}', )
+
+            res_evenements.ajouter_rk(
+                Constantes.SECURITE_PUBLIC,
+                f'evenement.{Constantes.DOMAINE_CORE_MAITREDESCOMPTES}.{Constantes.EVENEMENT_EVICT_USAGER}', )
 
             # Listener pour les subscriptions. Les routing keys sont gerees par subsbscription_handler dynamiquement.
             res_subscriptions = RessourcesConsommation(
