@@ -122,6 +122,18 @@ class SocketIoHandler:
                 'date_reception': datetime.datetime.utcnow(),
             }
 
+    async def evict_usager(self, message: MessageWrapper):
+        user_id = message.parsed['userId']
+        self.__logger.info("evict_usager Expulser usager %s" % user_id)
+
+        # Trouver les sids associes au user_id
+        for (sid, _) in self.get_participants('user.%s' % user_id):
+            self.__logger.debug("evict_usager %s SID:%s" % (user_id, sid))
+            async with self._sio.session(sid) as session:
+                session.clear()
+
+            await self._sio.disconnect(sid)
+
     async def authentifier_message(self, session: dict, message: dict,
                                    enveloppe: Optional[EnveloppeCertificat] = None) -> EnveloppeCertificat:
 
@@ -153,6 +165,10 @@ class SocketIoHandler:
                 user_id = request.headers[ConstantesWeb.HEADER_USER_ID]
                 user_name = request.headers[ConstantesWeb.HEADER_USER_NAME]
                 auth = request.headers[ConstantesWeb.HEADER_AUTH]
+
+                # Conserver toutes les connexion d'un meme usager dans
+                # la meme room. Permet de faire un evict au besoin.
+                await self._sio.enter_room(sid, 'user.%s' % user_id)
             except KeyError:
                 self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
                 raise ConnectionRefusedError('authentication failed')
@@ -226,7 +242,14 @@ class SocketIoHandler:
             return self.etat.formatteur_message.signer_message(
                 Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
 
-    async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], enveloppe=None):
+    async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]],
+                        exchanges: Union[str, list[str]], enveloppe=None, session_requise=True):
+        if session_requise is True:
+            async with self._sio.session(sid) as session:
+                if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
+                    return self.etat.formatteur_message.signer_message(
+                        Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
+
         async with self._semaphore_subscriptions:
             if enveloppe is not False:
                 async with self._sio.session(sid) as session:

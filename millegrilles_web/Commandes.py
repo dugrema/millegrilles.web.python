@@ -55,6 +55,9 @@ class CommandHandler(CommandesAbstract):
             res_volatil.ajouter_rk(
                 Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
+            res_volatil.ajouter_rk(
+                Constantes.SECURITE_PRIVE,
+                f'evenement.{Constantes.DOMAINE_CORE_MAITREDESCOMPTES}.{Constantes.EVENEMENT_EVICT_USAGER}', )
             messages_thread.ajouter_consumer(res_volatil)
 
         res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
@@ -111,6 +114,11 @@ class CommandHandler(CommandesAbstract):
                 if self.socket_io_handler:
                     if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
                         await self.socket_io_handler.recevoir_certificat_maitredescles(message)
+                        return False
+            elif exchange == Constantes.SECURITE_PRIVE:
+                if self.socket_io_handler:
+                    if action == Constantes.EVENEMENT_EVICT_USAGER:
+                        await self.socket_io_handler.evict_usager(message)
                         return False
 
         self.__logger.warning("Message non gere : %s sur exchange %s " % (routing_key, exchange))
