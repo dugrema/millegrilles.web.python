@@ -56,7 +56,7 @@ class CommandHandler(CommandesAbstract):
                 Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
             res_volatil.ajouter_rk(
-                Constantes.SECURITE_PRIVE,
+                Constantes.SECURITE_PUBLIC,
                 f'evenement.{Constantes.DOMAINE_CORE_MAITREDESCOMPTES}.{Constantes.EVENEMENT_EVICT_USAGER}', )
             messages_thread.ajouter_consumer(res_volatil)
 
@@ -115,8 +115,6 @@ class CommandHandler(CommandesAbstract):
                     if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
                         await self.socket_io_handler.recevoir_certificat_maitredescles(message)
                         return False
-            elif exchange == Constantes.SECURITE_PRIVE:
-                if self.socket_io_handler:
                     if action == Constantes.EVENEMENT_EVICT_USAGER:
                         await self.socket_io_handler.evict_usager(message)
                         return False

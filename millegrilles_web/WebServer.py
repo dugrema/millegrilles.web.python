@@ -28,7 +28,7 @@ class WebServer:
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self.__app_path = app_path
         self._etat = etat
-        self.__commandes = commandes
+        self._commandes = commandes
 
         self._stop_event: Optional[Event] = None
 
