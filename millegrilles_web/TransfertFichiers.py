@@ -553,12 +553,34 @@ class ReceptionFichiersMiddleware:
 
         while not self.__stop_event.is_set():
 
-            # TODO Entretien uploads
+            try:
+                await self.supprimer_uploads_expires()
+            except:
+                self.__logger.exception("thread_entretien Erreur supprimer_upload_expire")
 
             try:
                 await asyncio.wait_for(self.__stop_event.wait(), 30)
             except asyncio.TimeoutError:
                 pass
+
+    async def supprimer_uploads_expires(self):
+        configuration = self.__etat.configuration
+        path_staging_upload = pathlib.Path(configuration.dir_staging, ConstantesWeb.DIR_STAGING_UPLOAD)
+
+        expiration = datetime.datetime.now() - datetime.timedelta(days=3)
+        expiration_sec = expiration.timestamp()
+
+        for correlation_path in path_staging_upload.iterdir():
+            stat_correlation = await asyncio.to_thread(correlation_path.stat)
+            rep_date = stat_correlation.st_mtime
+            if rep_date < expiration_sec:
+                self.__logger.info("supprimer_upload_expire Suppression expire %s" % correlation_path)
+                try:
+                    await asyncio.to_thread(shutil.rmtree, correlation_path)
+                except FileNotFoundError:
+                    pass  # Ok
+                except:
+                    self.__logger.exception("supprimer_upload_expire Erreur suppression expire %s" % correlation_path)
 
     async def thread_verifier_parts(self):
         self.__queue_verifier_parts = asyncio.Queue(maxsize=20)
