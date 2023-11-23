@@ -386,9 +386,10 @@ class ReceptionFichiersMiddleware:
             path_upload = self.get_path_upload_batch(batch_id)
             path_upload.mkdir(parents=True, exist_ok=True)
 
+            path_fichier = pathlib.Path(path_upload, '%s.part' % position)
+            path_fichier_work = pathlib.Path(path_upload, '%s.part.work' % position)
             # S'assurer que le fichier n'existe pas deja
             try:
-                path_fichier = pathlib.Path(path_upload, '%s.part' % position)
                 path_fichier.stat()
                 return web.HTTPConflict()
             except OSError as e:
@@ -397,7 +398,7 @@ class ReceptionFichiersMiddleware:
                 else:
                     raise e
 
-            self.__logger.debug("handle_put Conserver part %s" % path_fichier)
+            self.__logger.debug("handle_put Conserver part %s" % path_fichier_work)
 
             if content_hash:
                 verificateur = VerificateurHachage(content_hash)
@@ -406,14 +407,14 @@ class ReceptionFichiersMiddleware:
 
             # Recevoir stream
             try:
-                with open(path_fichier, 'wb', buffering=1024*1024) as fichier:
+                with open(path_fichier_work, 'wb', buffering=1024*1024) as fichier:
                     async for chunk in request.content.iter_chunked(64 * 1024):
                         if verificateur:
                             verificateur.update(chunk)
                         fichier.write(chunk)
             except Exception:
-                self.__logger.exception("Erreur sauvegarde fichier part %s", path_fichier)
-                path_fichier.unlink(missing_ok=True)
+                self.__logger.exception("Erreur sauvegarde fichier part %s", path_fichier_work)
+                path_fichier_work.unlink(missing_ok=True)
                 return web.HTTPServerError()
 
             # Verifier hachage de la partie
@@ -422,16 +423,19 @@ class ReceptionFichiersMiddleware:
                     verificateur.verify()
                 except ErreurHachage as e:
                     self.__logger.info("handle_put Erreur verification hachage : %s" % str(e))
-                    path_fichier.unlink(missing_ok=True)
+                    path_fichier_work.unlink(missing_ok=True)
                     return web.HTTPBadRequest()
 
             # Verifier que la taille sur disque correspond a la taille attendue
             # Meme si le hachage est OK, s'assurer d'avoir conserve tous les bytes
-            stat = path_fichier.stat()
+            stat = path_fichier_work.stat()
             if content_length is not None and stat.st_size != content_length:
                 self.__logger.info("handle_put Erreur verification taille, sauvegarde %d, attendu %d" % (stat.st_size, content_length))
-                path_fichier.unlink(missing_ok=True)
+                path_fichier_work.unlink(missing_ok=True)
                 return web.HTTPBadRequest()
+
+            # Renommer le fichier (retirer .work)
+            path_fichier_work.rename(path_fichier)
 
             self.__logger.debug("handle_put batch_id: %s position: %s recu OK" % (batch_id, position))
 
@@ -462,8 +466,11 @@ class ReceptionFichiersMiddleware:
                 # Valider body, conserver json sur disque
                 etat = body['etat']
                 hachage = etat['hachage']
-                with open(path_etat, 'wt') as fichier:
-                    json.dump(etat, fichier)
+                try:
+                    with open(path_etat, 'wt') as fichier:
+                        json.dump(etat, fichier)
+                except FileNotFoundError:
+                    return web.HTTPNotFound()
 
                 try:
                     transaction = body['transaction']
