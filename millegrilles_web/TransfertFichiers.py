@@ -744,7 +744,7 @@ def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
     repertoires = list()
     for item in path_parent.iterdir():
         if item.is_dir():
-            path_lock = pathlib.Path(item, 'process.lock')
+            path_lock = pathlib.Path(item, 'transfert.lock')
             if is_locked(path_lock, timeout=300) is False:
                 repertoires.append(RepertoireStat(item))
 

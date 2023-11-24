@@ -413,7 +413,7 @@ def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
     for item in path_parent.iterdir():
         if item.is_dir():
             # Verifier si on a un lockfile non expire
-            path_lock = pathlib.Path(item, 'process.lock')
+            path_lock = pathlib.Path(item, 'intake.lock')
             if is_locked(path_lock, timeout=300) is False:
                 repertoires.append(RepertoireStat(item))
 
