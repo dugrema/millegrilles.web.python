@@ -21,7 +21,7 @@ from millegrilles_web.EtatWeb import EtatWeb
 
 BATCH_INTAKE_UPLOAD_DEFAULT = 100_000_000
 INTAKE_CHUNK_SIZE = 64 * 1024
-
+CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
 
 class EtatUploadParts:
 
@@ -191,7 +191,7 @@ class IntakeFichiers(IntakeHandler):
             fuuid = path_repertoire.name
             repertoires = None
             self.__logger.debug("traiter_prochaine_job Traiter job intake fichier pour fuuid %s" % fuuid)
-            path_lock = pathlib.Path(path_repertoire, 'process.lock')
+            path_lock = pathlib.Path(path_repertoire, CONST_TRANSFERT_LOCK_NAME)
             with FileLock(path_lock, lock_timeout=300):
                 path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
                 job = IntakeJob(fuuid, path_repertoire)
@@ -744,7 +744,7 @@ def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
     repertoires = list()
     for item in path_parent.iterdir():
         if item.is_dir():
-            path_lock = pathlib.Path(item, 'transfert.lock')
+            path_lock = pathlib.Path(item, CONST_TRANSFERT_LOCK_NAME)
             if is_locked(path_lock, timeout=300) is False:
                 repertoires.append(RepertoireStat(item))
 

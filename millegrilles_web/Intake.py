@@ -21,6 +21,8 @@ LOGGER = logging.getLogger(__name__)
 
 # CONST_MAX_RETRIES_CLE = 2
 
+CONST_INTAKE_LOCK_NAME = 'intake.lock'
+
 
 class IntakeJob:
 
@@ -83,7 +85,7 @@ class IntakeFichiers(IntakeHandler):
             fuuid = path_repertoire.name
             repertoires = None
             self.__logger.debug("traiter_prochaine_job Traiter job intake fichier pour fuuid %s" % fuuid)
-            path_lock = pathlib.Path(path_repertoire, 'process.lock')
+            path_lock = pathlib.Path(path_repertoire, CONST_INTAKE_LOCK_NAME)
             with FileLock(path_lock, lock_timeout=300):
                 path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
                 job = IntakeJob(fuuid, path_repertoire)
@@ -413,7 +415,7 @@ def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
     for item in path_parent.iterdir():
         if item.is_dir():
             # Verifier si on a un lockfile non expire
-            path_lock = pathlib.Path(item, 'intake.lock')
+            path_lock = pathlib.Path(item, CONST_INTAKE_LOCK_NAME)
             if is_locked(path_lock, timeout=300) is False:
                 repertoires.append(RepertoireStat(item))
 
