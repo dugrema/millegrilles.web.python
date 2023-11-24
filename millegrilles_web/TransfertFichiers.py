@@ -23,6 +23,7 @@ BATCH_INTAKE_UPLOAD_DEFAULT = 100_000_000
 INTAKE_CHUNK_SIZE = 64 * 1024
 CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
 
+
 class EtatUploadParts:
 
     def __init__(self, fuuid: str, file_parts: list[pathlib.Path], stop_event: asyncio.Event, taille):
