@@ -15,6 +15,7 @@ from typing import Optional
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.Hachage import VerificateurHachage, ErreurHachage
 from millegrilles_messages.jobs.Intake import IntakeHandler
+from millegrilles_messages.FileLocking import FileLock, FileLockedException, is_locked
 from millegrilles_web import Constantes as ConstantesWeb
 from millegrilles_web.EtatWeb import EtatWeb
 
@@ -190,11 +191,15 @@ class IntakeFichiers(IntakeHandler):
             fuuid = path_repertoire.name
             repertoires = None
             self.__logger.debug("traiter_prochaine_job Traiter job intake fichier pour fuuid %s" % fuuid)
-            path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
-            job = IntakeJob(fuuid, path_repertoire)
-            await self.traiter_job(job)
+            path_lock = pathlib.Path(path_repertoire, 'process.lock')
+            with FileLock(path_lock, lock_timeout=300):
+                path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
+                job = IntakeJob(fuuid, path_repertoire)
+                await self.traiter_job(job)
         except IndexError:
             return None  # Condition d'arret de l'intake
+        except FileLockedException:
+            return {'ok': False, 'err': 'job locked - traitement en cours'}
         except FileNotFoundError as e:
             raise e  # Erreur fatale
         except aiohttp.ClientResponseError as e:
@@ -739,7 +744,9 @@ def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
     repertoires = list()
     for item in path_parent.iterdir():
         if item.is_dir():
-            repertoires.append(RepertoireStat(item))
+            path_lock = pathlib.Path(item, 'process.lock')
+            if is_locked(path_lock, timeout=300) is False:
+                repertoires.append(RepertoireStat(item))
 
     # Trier repertoires par date
     repertoires = sorted(repertoires, key=get_modification_date)
