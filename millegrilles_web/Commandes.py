@@ -54,7 +54,7 @@ class CommandHandler(CommandesAbstract):
             res_volatil.set_ttl(300000)  # millisecs
             res_volatil.ajouter_rk(
                 Constantes.SECURITE_PUBLIC,
-                f'evenement.{Constantes.DOMAINE_GLOBAL}.{Constantes.EVENEMENT_CEDULE}', )
+                f'evenement.{Constantes.ROLE_CEDULEUR}.{Constantes.EVENEMENT_PING_CEDULE}', )
             messages_thread.ajouter_consumer(res_volatil)
 
         res_evenements = RessourcesConsommation(self.callback_reply_q, channel_separe=True, est_asyncio=True)
@@ -83,8 +83,11 @@ class CommandHandler(CommandesAbstract):
     async def traiter_commande(self, producer: MessageProducerFormatteur, message: MessageWrapper):
         routing_key = message.routing_key
         exchange = message.exchange
-        action = routing_key.split('.').pop()
-        type_message = routing_key.split('.')[0]
+
+        rk_split = routing_key.split('.')
+        type_message = rk_split[0]
+        domaine = rk_split[1]
+        action = rk_split.pop()
         enveloppe = message.certificat
 
         try:
@@ -109,9 +112,10 @@ class CommandHandler(CommandesAbstract):
 
         if type_message == 'evenement':
             if exchange == Constantes.SECURITE_PUBLIC:
-                if action == Constantes.EVENEMENT_CEDULE:
-                    await self.traiter_cedule(producer, message)
-                    return False
+                if domaine == Constantes.ROLE_CEDULEUR:
+                    if action == Constantes.EVENEMENT_PING_CEDULE:
+                        await self.traiter_cedule(producer, message)
+                        return False
                 if self.socket_io_handler:
                     if action == Constantes.EVENEMENT_MAITREDESCLES_CERTIFICAT:
                         await self.socket_io_handler.recevoir_certificat_maitredescles(message)
@@ -125,11 +129,17 @@ class CommandHandler(CommandesAbstract):
         return False  # Empeche de transmettre un message de reponse
 
     async def traiter_cedule(self, producer: MessageProducerFormatteur, message: MessageWrapper):
+
+        if Constantes.SECURITE_PUBLIC not in message.certificat.get_exchanges:
+            self.__logger.warning("traiter_cedule Message sans l'exchange 1.public - SKIP")
+        elif Constantes.ROLE_CEDULEUR not in message.certificat.get_roles:
+            self.__logger.warning("traiter_cedule Message sans le role ceduleur - SKIP")
+
         contenu = message.parsed
         date_cedule = datetime.datetime.fromtimestamp(contenu['estampille'], tz=pytz.UTC)
 
         now = datetime.datetime.now(tz=pytz.UTC)
-        if now - datetime.timedelta(minutes=2) > date_cedule:
+        if now - datetime.timedelta(seconds=80) > date_cedule:
             return  # Vieux message de cedule
 
         weekday = date_cedule.weekday()
