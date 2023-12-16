@@ -247,13 +247,13 @@ class SocketIoHandler:
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]],
                         exchanges: Union[str, list[str]], enveloppe=None, session_requise=True, user_id: Optional[str] = None):
-        if session_requise is True:
-            async with self._sio.session(sid) as session:
-                if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
-                    return self.etat.formatteur_message.signer_message(
-                        Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
-
         async with self._semaphore_subscriptions:
+            if session_requise is True:
+                async with self._sio.session(sid) as session:
+                    if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
+                        return self.etat.formatteur_message.signer_message(
+                            Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
+
             if user_id is None:
                 if enveloppe is not False:
                     async with self._sio.session(sid) as session:
@@ -273,14 +273,17 @@ class SocketIoHandler:
                 # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
                 return {'ok': False}
 
-    async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+    async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], session_requise=True):
         async with self._semaphore_subscriptions:
-            async with self._sio.session(sid) as session:
-                try:
-                    enveloppe = await self.authentifier_message(session, message)
-                    user_id = enveloppe.get_user_id
-                except (KeyError, ErreurAuthentificationMessage):
-                    user_id = None
+            if session_requise is True:
+                async with self._sio.session(sid) as session:
+                    try:
+                        enveloppe = await self.authentifier_message(session, message)
+                        user_id = enveloppe.get_user_id
+                    except (KeyError, ErreurAuthentificationMessage):
+                        user_id = None
+            else:
+                user_id = None
 
             try:
                 return await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)

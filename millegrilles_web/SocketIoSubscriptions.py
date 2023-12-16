@@ -110,7 +110,7 @@ class SocketIoSubscriptions:
             'roomParam': None
         }
 
-    async def unsubscribe(self, sid: str, user_id: str, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
+    async def unsubscribe(self, sid: str, user_id: Optional[str], routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]]):
         self.__logger.debug('unsubscribe sid: %s (user_id %s) de %s/%s' % (sid, user_id, exchanges, routing_keys))
         if isinstance(routing_keys, str):
             routing_keys = [routing_keys]
