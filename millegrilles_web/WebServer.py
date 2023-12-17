@@ -24,11 +24,12 @@ from millegrilles_web.SocketIoHandler import SocketIoHandler
 
 class WebServer:
 
-    def __init__(self, app_path: str, etat: EtatWeb, commandes: CommandHandler):
+    def __init__(self, app_path: str, etat: EtatWeb, commandes: CommandHandler, duree_session=1800):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self.__app_path = app_path
         self._etat = etat
         self._commandes = commandes
+        self.__duree_session = duree_session
 
         self._stop_event: Optional[Event] = None
 
@@ -144,7 +145,7 @@ class WebServer:
 
         storage = aiohttp_session.redis_storage.RedisStorage(
             redis_session, cookie_name=self.get_nom_app() + '.aiohttp',
-            max_age=1800,
+            max_age=self.__duree_session,
             secure=True, httponly=True
         )
 
