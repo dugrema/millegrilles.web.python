@@ -520,7 +520,7 @@ class ReceptionFichiersMiddleware:
             except Exception as e:
                 self.__logger.warning('handle_post Erreur ajout fichier %s assemble au intake : %s' % (batch_id, e))
                 shutil.rmtree(path_upload)
-                return web.HTTPServerError()
+                return web.HTTPInternalServerError()
 
             # Emettre la transaction en mode 'nouvelleVersion' pour preparer l'entree a l'ecran durant le transfert
             #         const transaction = JSON.parse(await fsPromises.readFile(entry.fullPath))
