@@ -91,8 +91,8 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
 
 
 async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatWeb, fuuid,
-                                 path_fichiers: pathlib.Path,
-                                 batch_size=BATCH_INTAKE_UPLOAD_DEFAULT):
+                                 path_fichiers: pathlib.Path, transaction: Optional[dict] = None,
+                                 batch_size=BATCH_INTAKE_UPLOAD_DEFAULT) -> aiohttp.ClientResponse:
     ssl_context = etat_web.ssl_context
     url_consignation = await asyncio.wait_for(etat_web.get_url_consignation(), timeout=5)
     url_fichier = f'{url_consignation}/fichiers_transfert/{fuuid}'
@@ -119,23 +119,26 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
             if session_response is not None:
                 session_response.release()
 
-    contenu = dict()
+    contenu = {'transaction': transaction}
 
     with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_ETAT).open('rt') as fichier:
         contenu['etat'] = json.load(fichier)
 
-    # Charger fichiers de transaction et cle si disponible
-    try:
-        with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_TRANSACTION).open('rt') as fichier:
-            contenu['transaction'] = json.load(fichier)
-    except OSError as e:
-        if e.errno == errno.ENOENT:
-            pass  # OK
-        else:
-            raise e
+    # Charger fichiers de transaction disponible
+    if transaction is None:
+        try:
+            with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_TRANSACTION).open('rt') as fichier:
+                contenu['transaction'] = json.load(fichier)
+        except OSError as e:
+            if e.errno == errno.ENOENT:
+                pass  # OK
+            else:
+                raise e
 
     async with session.post(url_fichier, json=contenu, ssl=ssl_context, headers=headers) as resp:
         resp.raise_for_status()
+
+    return resp
 
 
 class IntakeJob:
@@ -199,7 +202,7 @@ class IntakeFichiers(IntakeHandler):
             with FileLock(path_lock, lock_timeout=300):
                 path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
                 job = IntakeJob(fuuid, path_repertoire)
-                await self.traiter_job(job)
+                response = await self.traiter_job(job)
         except IndexError:
             return None  # Condition d'arret de l'intake
         except FileLockedException:
@@ -221,11 +224,30 @@ class IntakeFichiers(IntakeHandler):
         await self.handle_retries(job)
 
         timeout = aiohttp.ClientTimeout(connect=20)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job)
+        try:
+            transaction = job.transaction
+        except AttributeError:
+            transaction = None
 
-        # Supprimer le repertoire de la job
-        shutil.rmtree(job.path_job)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction)
+
+            if response.status == 202:
+                # Le fichier et recu et valide, supprimer le repertoire de la job
+                self.__logger.debug("traiter_job Upload et validation du fichier %s complete, supprimer localement" % job.fuuid)
+                shutil.rmtree(job.path_job, ignore_errors=True)
+            elif response.status == 201:
+                self.__logger.debug("traiter_job Upload fichier %s complete, validation en cours (job locale non supprimee)" % job.fuuid)
+            elif response.status == 200:
+                self.__logger.debug("traiter_job Upload fichier %s annule, le fichier et deja sur le serveur" % job.fuuid)
+                shutil.rmtree(job.path_job, ignore_errors=True)
+        except aiohttp.ClientResponseError as cre:
+            if cre.status == 409:
+                self.__logger.debug("traiter_job Le fichier %s existe deja, supprimer job %s" % (job.fuuid, job.path_job))
+                shutil.rmtree(job.path_job, ignore_errors=True)
+            else:
+                raise cre
 
     async def handle_retries(self, job: IntakeJob):
         path_repertoire = job.path_job
@@ -490,14 +512,6 @@ class ReceptionFichiersMiddleware:
                 except KeyError:
                     pass
 
-                try:
-                    cles = body['cles']
-                    await self.__etat.validateur_message.verifier(cles)  # Lance exception si echec verification
-                    path_cles = pathlib.Path(path_upload, ConstantesWeb.FICHIER_CLES)
-                    with open(path_cles, 'wt') as fichier:
-                        json.dump(cles, fichier)
-                except KeyError:
-                    pass
             else:
                 # Sauvegarder etat.json sans body
                 etat = {'hachage': batch_id, 'retryCount': 0, 'created': int(datetime.datetime.utcnow().timestamp()*1000)}
@@ -519,26 +533,6 @@ class ReceptionFichiersMiddleware:
                 self.__logger.warning('handle_post Erreur verification hachage fichier %s assemble : %s' % (batch_id, e))
                 shutil.rmtree(path_upload)
                 return web.HTTPFailedDependency()
-
-            # # Transferer vers intake
-            # try:
-            #     await self.__intake.ajouter_upload(path_upload)
-            # except Exception as e:
-            #     self.__logger.warning('handle_post Erreur ajout fichier %s assemble au intake : %s' % (batch_id, e))
-            #     shutil.rmtree(path_upload)
-            #     return web.HTTPInternalServerError()
-            #
-            # # Emettre la transaction en mode 'nouvelleVersion' pour preparer l'entree a l'ecran durant le transfert
-            # #         const transaction = JSON.parse(await fsPromises.readFile(entry.fullPath))
-            # #         await transmettreCommande(socket, transaction, 'nouvelleVersion', {domaine: 'GrosFichiers'})
-            # try:
-            #     producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=0.3)
-            #     await producer.executer_commande(transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
-            #                                      action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
-            #                                      nowait=True, noformat=True)
-            # except Exception as e:
-            #     self.__logger.warning("handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
-            #                           "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
 
             return web.HTTPAccepted()
 
