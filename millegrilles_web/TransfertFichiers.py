@@ -23,6 +23,8 @@ BATCH_INTAKE_UPLOAD_DEFAULT = 100_000_000
 INTAKE_CHUNK_SIZE = 64 * 1024
 CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
 
+LOGGER = logging.getLogger(__name__)
+
 
 class EtatUploadParts:
 
@@ -40,7 +42,8 @@ class EtatUploadParts:
 
 class JobVerifierParts:
 
-    def __init__(self, path_upload: pathlib.Path, hachage: str):
+    def __init__(self, transaction: dict, path_upload: pathlib.Path, hachage: str):
+        self.transaction = transaction
         self.path_upload = path_upload
         self.hachage = hachage
         self.done = asyncio.Event()
@@ -346,7 +349,7 @@ class ReceptionFichiersMiddleware:
         self._charger_ssl()
         await self.__intake.configurer()
 
-        path_staging = pathlib.Path(self.__etat.configuration.dir_staging)
+        path_staging = pathlib.Path(self.__etat.configuration.dir_staging, 'upload')
         path_staging.mkdir(parents=True, exist_ok=True)
 
     def _preparer_routes(self):
@@ -504,35 +507,38 @@ class ReceptionFichiersMiddleware:
 
             # Valider hachage du fichier complet (parties assemblees)
             try:
-                job_valider = JobVerifierParts(path_upload, hachage)
+                job_valider = JobVerifierParts(transaction, path_upload, hachage)
                 await self.__queue_verifier_parts.put(job_valider)
-                await asyncio.wait_for(job_valider.done.wait(), timeout=270)
+                await asyncio.wait_for(job_valider.done.wait(), timeout=25)
                 if job_valider.exception is not None:
                     raise job_valider.exception
+            except asyncio.TimeoutError:
+                self.__logger.warning("handle_post Timeout attente verification fichier %s, return HTTP 200" % batch_id)
+                return web.HTTPOk()
             except Exception as e:
                 self.__logger.warning('handle_post Erreur verification hachage fichier %s assemble : %s' % (batch_id, e))
                 shutil.rmtree(path_upload)
                 return web.HTTPFailedDependency()
 
-            # Transferer vers intake
-            try:
-                await self.__intake.ajouter_upload(path_upload)
-            except Exception as e:
-                self.__logger.warning('handle_post Erreur ajout fichier %s assemble au intake : %s' % (batch_id, e))
-                shutil.rmtree(path_upload)
-                return web.HTTPInternalServerError()
-
-            # Emettre la transaction en mode 'nouvelleVersion' pour preparer l'entree a l'ecran durant le transfert
-            #         const transaction = JSON.parse(await fsPromises.readFile(entry.fullPath))
-            #         await transmettreCommande(socket, transaction, 'nouvelleVersion', {domaine: 'GrosFichiers'})
-            try:
-                producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=0.3)
-                await producer.executer_commande(transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
-                                                 action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
-                                                 nowait=True, noformat=True)
-            except Exception as e:
-                self.__logger.warning("handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
-                                      "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
+            # # Transferer vers intake
+            # try:
+            #     await self.__intake.ajouter_upload(path_upload)
+            # except Exception as e:
+            #     self.__logger.warning('handle_post Erreur ajout fichier %s assemble au intake : %s' % (batch_id, e))
+            #     shutil.rmtree(path_upload)
+            #     return web.HTTPInternalServerError()
+            #
+            # # Emettre la transaction en mode 'nouvelleVersion' pour preparer l'entree a l'ecran durant le transfert
+            # #         const transaction = JSON.parse(await fsPromises.readFile(entry.fullPath))
+            # #         await transmettreCommande(socket, transaction, 'nouvelleVersion', {domaine: 'GrosFichiers'})
+            # try:
+            #     producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=0.3)
+            #     await producer.executer_commande(transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
+            #                                      action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
+            #                                      nowait=True, noformat=True)
+            # except Exception as e:
+            #     self.__logger.warning("handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
+            #                           "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
 
             return web.HTTPAccepted()
 
@@ -630,23 +636,56 @@ class ReceptionFichiersMiddleware:
                     self.__logger.error("thread_verifier_parts Erreur traitement message : %s" % d.exception())
                 else:
                     job_verifier_parts: JobVerifierParts = d.result()
+                    path_upload = job_verifier_parts.path_upload
                     try:
+                        await self.traiter_job_verifier_parts(job_verifier_parts)
                         path_upload = job_verifier_parts.path_upload
-                        hachage = job_verifier_parts.hachage
-                        args = [path_upload, hachage]
-                        # Utiliser thread pool pour validation
-                        await asyncio.to_thread(valider_hachage_upload_parts, *args)
                     except Exception as e:
                         self.__logger.exception("thread_verifier_parts Erreur verification hachage %s" % job_verifier_parts.hachage)
                         job_verifier_parts.exception = e
-
-                    # Liberer job
-                    job_verifier_parts.done.set()
+                        shutil.rmtree(path_upload, ignore_errors=True)
+                    finally:
+                        # Liberer job
+                        job_verifier_parts.done.set()
 
             if len(pending) == 0:
                 raise Exception('arrete indirectement (pending vide)')
 
             pending.add(asyncio.create_task(self.__queue_verifier_parts.get()))
+
+    async def traiter_job_verifier_parts(self, job: JobVerifierParts):
+        try:
+            path_upload = job.path_upload
+            hachage = job.hachage
+            args = [path_upload, hachage]
+            # Utiliser thread pool pour validation
+            await asyncio.to_thread(valider_hachage_upload_parts, *args)
+        except Exception as e:
+            self.__logger.warning(
+                'traiter_job_verifier_parts Erreur verification hachage fichier %s assemble : %s' % (job.path_upload, e))
+            shutil.rmtree(job.path_upload, ignore_errors=True)
+            # return web.HTTPFailedDependency()
+            raise e
+
+        # Transferer vers intake
+        try:
+            await self.__intake.ajouter_upload(path_upload)
+        except Exception as e:
+            self.__logger.warning(
+                'handle_post Erreur ajout fichier %s assemble au intake : %s' % (path_upload, e))
+            # shutil.rmtree(path_upload)
+            # return web.HTTPInternalServerError()
+            raise e
+
+        try:
+            producer = await asyncio.wait_for(self.__etat.producer_wait(), timeout=3)
+            await producer.executer_commande(job.transaction, domaine=Constantes.DOMAINE_GROS_FICHIERS,
+                                             action='nouvelleVersion', exchange=Constantes.SECURITE_PRIVE,
+                                             nowait=True, noformat=True)
+        except Exception as e:
+            self.__logger.warning(
+                "handle_post Erreur emission transaction en mode nouvelleVersion (timeout) - "
+                "La transaction va etre re-emis sur fin de transfert. : %s" % str(e))
 
     async def run(self, stop_event: Optional[asyncio.Event] = None):
         if stop_event is not None:
