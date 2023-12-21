@@ -22,6 +22,8 @@ from millegrilles_web.EtatWeb import EtatWeb
 BATCH_INTAKE_UPLOAD_DEFAULT = 100_000_000
 INTAKE_CHUNK_SIZE = 64 * 1024
 CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
+CONST_TRANSFERT_LASTPROCESS_NAME = 'transfert.last'
+CONST_TIMEOUT_JOB = 300
 
 LOGGER = logging.getLogger(__name__)
 
@@ -193,14 +195,16 @@ class IntakeFichiers(IntakeHandler):
 
     async def traiter_prochaine_job(self) -> Optional[dict]:
         try:
-            repertoires = repertoires_par_date(self.__path_intake)
+            repertoires = repertoires_par_date(self.__path_intake, timeout=CONST_TIMEOUT_JOB)
             path_repertoire = repertoires[0].path_fichier
             fuuid = path_repertoire.name
             repertoires = None
             self.__logger.debug("traiter_prochaine_job Traiter job intake fichier pour fuuid %s" % fuuid)
             path_lock = pathlib.Path(path_repertoire, CONST_TRANSFERT_LOCK_NAME)
-            with FileLock(path_lock, lock_timeout=300):
+            path_last = pathlib.Path(path_repertoire, CONST_TRANSFERT_LASTPROCESS_NAME)
+            with FileLock(path_lock, lock_timeout=CONST_TIMEOUT_JOB):
                 path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
+                path_last.touch()
                 job = IntakeJob(fuuid, path_repertoire)
                 response = await self.traiter_job(job)
         except IndexError:
@@ -229,6 +233,8 @@ class IntakeFichiers(IntakeHandler):
         except AttributeError:
             transaction = None
 
+        supprimer_job = False
+
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction)
@@ -236,18 +242,24 @@ class IntakeFichiers(IntakeHandler):
             if response.status == 202:
                 # Le fichier et recu et valide, supprimer le repertoire de la job
                 self.__logger.debug("traiter_job Upload et validation du fichier %s complete, supprimer localement" % job.fuuid)
-                shutil.rmtree(job.path_job, ignore_errors=True)
+                supprimer_job = True
             elif response.status == 201:
                 self.__logger.debug("traiter_job Upload fichier %s complete, validation en cours (job locale non supprimee)" % job.fuuid)
             elif response.status == 200:
                 self.__logger.debug("traiter_job Upload fichier %s annule, le fichier et deja sur le serveur" % job.fuuid)
-                shutil.rmtree(job.path_job, ignore_errors=True)
+                supprimer_job = True
         except aiohttp.ClientResponseError as cre:
             if cre.status == 409:
-                self.__logger.debug("traiter_job Le fichier %s existe deja, supprimer job %s" % (job.fuuid, job.path_job))
-                shutil.rmtree(job.path_job, ignore_errors=True)
+                self.__logger.debug("traiter_job Le fichier %s existe deja dans la consignation, supprimer job %s" % (job.fuuid, job.path_job))
+                supprimer_job = True
+            elif cre.status == 424:
+                self.__logger.debug(
+                    "traiter_job Le fichier %s est corrompu sur le serveur, tenter de re-uploader la job %s plus tard" % (job.fuuid, job.path_job))
             else:
                 raise cre
+
+        if supprimer_job:
+            shutil.rmtree(job.path_job, ignore_errors=True)
 
     async def handle_retries(self, job: IntakeJob):
         path_repertoire = job.path_job
@@ -773,13 +785,21 @@ class RepertoireStat:
         return self.stat.st_mtime
 
 
-def repertoires_par_date(path_parent: pathlib.Path) -> list[RepertoireStat]:
+def repertoires_par_date(path_parent: pathlib.Path, timeout=300) -> list[RepertoireStat]:
 
     repertoires = list()
+    expiration = (datetime.datetime.now() - datetime.timedelta(seconds=timeout)).timestamp()
     for item in path_parent.iterdir():
         if item.is_dir():
             path_lock = pathlib.Path(item, CONST_TRANSFERT_LOCK_NAME)
-            if is_locked(path_lock, timeout=300) is False:
+            path_last = pathlib.Path(item, CONST_TRANSFERT_LASTPROCESS_NAME)
+            if is_locked(path_lock, timeout=timeout) is False:
+                try:
+                    stat_last = path_last.stat()
+                    if stat_last.st_mtime > expiration:
+                        continue  # Skip
+                except FileNotFoundError:
+                    pass
                 repertoires.append(RepertoireStat(item))
 
     # Trier repertoires par date
