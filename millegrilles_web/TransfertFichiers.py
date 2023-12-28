@@ -465,7 +465,7 @@ class ReceptionFichiersMiddleware:
                 try:
                     verificateur.verify()
                 except ErreurHachage as e:
-                    self.__logger.info("handle_put Erreur verification hachage : %s" % str(e))
+                    self.__logger.info("handle_put Erreur verification hachage %s/%s : %s" % (batch_id, position, str(e)))
                     path_fichier_work.unlink(missing_ok=True)
                     return web.HTTPBadRequest()
 
