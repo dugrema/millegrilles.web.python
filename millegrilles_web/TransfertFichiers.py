@@ -451,7 +451,7 @@ class ReceptionFichiersMiddleware:
             # Recevoir stream
             try:
                 with open(path_fichier_work, 'wb', buffering=1024*1024) as fichier:
-                    async for chunk in request.content.iter_chunked(64 * 1024):
+                    async for chunk in request.content.iter_chunked(INTAKE_CHUNK_SIZE):
                         if verificateur:
                             verificateur.update(chunk)
                         fichier.write(chunk)
@@ -543,7 +543,7 @@ class ReceptionFichiersMiddleware:
                 return web.HTTPOk()
             except Exception as e:
                 self.__logger.warning('handle_post Erreur verification hachage fichier %s assemble : %s' % (batch_id, e))
-                shutil.rmtree(path_upload)
+                shutil.rmtree(path_upload, ignore_errors=True)
                 return web.HTTPFailedDependency()
 
             return web.HTTPAccepted()
@@ -728,7 +728,7 @@ def valider_hachage_upload_parts(path_upload: pathlib.Path, hachage: str):
 
         with open(path_fichier, 'rb') as fichier:
             while True:
-                chunk = fichier.read(64*1024)
+                chunk = fichier.read(INTAKE_CHUNK_SIZE)
                 if not chunk:
                     break
                 verificateur.update(chunk)
@@ -831,7 +831,7 @@ def reassembler_fichier(job: IntakeJob) -> pathlib.Path:
             path_part = pathlib.Path(path_repertoire, '%d.part' % position)
             with open(path_part, 'rb') as part_file:
                 while True:
-                    chunk = part_file.read(64*1024)
+                    chunk = part_file.read(INTAKE_CHUNK_SIZE)
                     if not chunk:
                         break
                     output.write(chunk)
