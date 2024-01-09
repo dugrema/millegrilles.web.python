@@ -303,8 +303,8 @@ class IntakeFichiers(IntakeHandler):
                         response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction, stop_event = self._stop_event)
                     break  # Done
                 except aiohttp.ClientOSError as ose:
-                    if ose.errno == 1:
-                        # Erreur SSL, reessayer immediatement
+                    if ose.errno in [1, 104]:
+                        # Erreurs [SSL, reset by peer], reessayer immediatement
                         pass
                     else:
                         raise ose
