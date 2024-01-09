@@ -128,6 +128,8 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
         if info_existant.get('complet') is True:
             return reponse_existant  # Le fichier existe deja, on termine la job d'upload
         position_part_initial = info_existant['position']
+    elif reponse_existant.status == 201:
+        return reponse_existant  # En cours de traitement (intake)
     else:
         err_msg = f"Erreur debut upload fuuid {fuuid}, status {reponse_existant.status}"
         raise Exception(err_msg)
@@ -285,7 +287,6 @@ class IntakeFichiers(IntakeHandler):
         raise NotImplementedError('must override')
 
     async def traiter_job(self, job, done_event: asyncio.Event):
-        await self.handle_retries(job)
 
         timeout = aiohttp.ClientTimeout(connect=20)
         try:
@@ -297,6 +298,7 @@ class IntakeFichiers(IntakeHandler):
 
         try:
             response = None
+
             for retry in range(0, 5):
                 try:
                     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -312,6 +314,7 @@ class IntakeFichiers(IntakeHandler):
                     if retry >= 4:
                         raise ose
 
+                    self.__logger.info("traiter_job Job %s interrompue par (%s), retry dans 5 secondes" % (job.fuuid, str(ose)))
                     await asyncio.sleep(5)  # Delai 5 secondes
 
             if response.status == 202:
@@ -332,6 +335,9 @@ class IntakeFichiers(IntakeHandler):
                     "traiter_job Le fichier %s est corrompu sur le serveur, tenter de re-uploader la job %s plus tard" % (job.fuuid, job.path_job))
             else:
                 raise cre
+        except Exception:
+            # Pour toute autre exception, on incremente le retry counter
+            await self.handle_retries(job)
         finally:
             done_event.set()
 
