@@ -24,6 +24,7 @@ INTAKE_CHUNK_SIZE = 64 * 1024
 CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
 CONST_TRANSFERT_LASTPROCESS_NAME = 'transfert.last'
 CONST_TIMEOUT_JOB = 90
+CONST_MAX_RETRIES = 10
 
 LOGGER = logging.getLogger(__name__)
 
@@ -295,8 +296,23 @@ class IntakeFichiers(IntakeHandler):
         supprimer_job = False
 
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction, stop_event = self._stop_event)
+            response = None
+            for retry in range(0, 5):
+                try:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction, stop_event = self._stop_event)
+                    break  # Done
+                except aiohttp.ClientOSError as ose:
+                    if ose.errno == 1:
+                        # Erreur SSL, reessayer immediatement
+                        pass
+                    else:
+                        raise ose
+
+                    if retry >= 4:
+                        raise ose
+
+                    await asyncio.sleep(5)  # Delai 5 secondes
 
             if response.status == 202:
                 # Le fichier et recu et valide, supprimer le repertoire de la job
@@ -334,7 +350,7 @@ class IntakeFichiers(IntakeHandler):
         except FileNotFoundError:
             info_retry = {'retry': -1}
 
-        if info_retry['retry'] > 3:
+        if info_retry['retry'] > CONST_MAX_RETRIES:
             self.__logger.error("Job %s irrecuperable, trop de retries" % fuuid)
             # Deplacer vers jobs en erreur
             path_jobs_rejected = pathlib.Path(self.__path_intake.parent, 'intake_rejected')
