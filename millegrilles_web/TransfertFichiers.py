@@ -30,13 +30,13 @@ LOGGER = logging.getLogger(__name__)
 
 class EtatUploadParts:
 
-    def __init__(self, fuuid: str, file_parts: list[pathlib.Path], stop_event: asyncio.Event, taille):
+    def __init__(self, fuuid: str, file_parts: list[pathlib.Path], stop_event: asyncio.Event, position=0):
         self.fuuid = fuuid
         self.file_parts = file_parts
         self.fp_file = None  # fp du fichier courant
         self.stop_event = stop_event
-        self.taille = taille
-        self.position = 0
+        # self.taille = taille
+        self.position = position
         self.samples = list()
         self.cb_activite = None
         self.done = False
@@ -56,15 +56,22 @@ class JobVerifierParts:
 async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD_DEFAULT):
     taille_uploade = 0
 
+    position_fichier = None
     if not etat_upload.fp_file:
         try:
             prochain_fichier = etat_upload.file_parts.pop(0)
+            position_fichier = int(prochain_fichier.name.split('.')[0])
             etat_upload.fp_file = prochain_fichier.open(mode='rb')
         except IndexError:
             etat_upload.done = True
             etat_upload.fp_file = None
 
     input_stream = etat_upload.fp_file
+
+    # Verifier s'il faut skipper des bytes
+    if input_stream and position_fichier and etat_upload.position != position_fichier:
+        skip_bytes_len = position_fichier - etat_upload.position
+        input_stream.seek(skip_bytes_len)
 
     while input_stream and taille_uploade < limit:
         if etat_upload.stop_event.is_set():
@@ -106,22 +113,50 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
 
     headers = {'x-fuuid': fuuid}
 
+    # Verifier si le fichier existe deja et si la job d'upload est deja partiellement uploadee
+    url_verifier_job = f'{url_consignation}/fichiers_transfert/job/{fuuid}'
+    reponse_existant = await session.get(url_verifier_job, ssl=ssl_context, headers=headers)
+    if reponse_existant.status == 404:
+        # Ok, la job est inconnue. On upload du debut.
+        position_part_initial = 0
+    elif reponse_existant.status == 200:
+        # Le fichier ou la job existent deja, verifier la situation.
+        info_existant = await reponse_existant.json()
+        if info_existant.get('complet') is True:
+            return reponse_existant  # Le fichier existe deja, on termine la job d'upload
+        position_part_initial = info_existant['position']
+    else:
+        err_msg = f"Erreur debut upload fuuid {fuuid}, status {reponse_existant.status}"
+        raise Exception(err_msg)
+
     if stop_event is None:
         stop_event = asyncio.Event()
-    etat_upload = EtatUploadParts(fuuid, liste_parts, stop_event, 0)
-    while not etat_upload.done:
-        position = etat_upload.position
-        feeder_coro = feed_filepart2(etat_upload, limit=batch_size)
-        session_coro = session.put(f'{url_fichier}/{position}', ssl=ssl_context, headers=headers, data=feeder_coro)
+    if len(liste_parts) > 0:
 
-        # Uploader chunk
-        session_response = None
-        try:
-            session_response = await session_coro
-            session_response.raise_for_status()
-        finally:
-            if session_response is not None:
-                session_response.release()
+        if position_part_initial != 0:
+            # Filtrer toutes les positions qui sont deja traitees
+            parts_a_traiter = liste_parts
+            liste_parts = list()
+            for part in parts_a_traiter:
+                position = int(part.name.split('.')[0])
+                if position >= position_part_initial:
+                    # Conserver
+                    liste_parts.append(part)
+
+        etat_upload = EtatUploadParts(fuuid, liste_parts, stop_event, position=position_part_initial)
+        while not etat_upload.done:
+            position = etat_upload.position
+            feeder_coro = feed_filepart2(etat_upload, limit=batch_size)
+            session_coro = session.put(f'{url_fichier}/{position}', ssl=ssl_context, headers=headers, data=feeder_coro)
+
+            # Uploader chunk
+            session_response = None
+            try:
+                session_response = await session_coro
+                session_response.raise_for_status()
+            finally:
+                if session_response is not None:
+                    session_response.release()
 
     contenu = {'transaction': transaction}
 
@@ -293,7 +328,15 @@ class IntakeFichiers(IntakeHandler):
 
         if info_retry['retry'] > 3:
             self.__logger.error("Job %s irrecuperable, trop de retries" % fuuid)
-            shutil.rmtree(path_repertoire)
+            # Deplacer vers jobs en erreur
+            path_jobs_rejected = pathlib.Path(self.__path_intake.parent, 'intake_rejected')
+            path_jobs_rejected.mkdir(exist_ok=True)
+            path_jobs_rejected_fuuid = pathlib.Path(path_jobs_rejected, fuuid)
+            try:
+                path_repertoire.rename(path_jobs_rejected_fuuid)
+            except:
+                self.__logger.exception("Erreur deplacement job rejetee, on la supprime")
+                shutil.rmtree(path_repertoire)
             raise Exception('too many retries')
         else:
             info_retry['retry'] += 1
