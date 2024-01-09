@@ -23,7 +23,7 @@ BATCH_INTAKE_UPLOAD_DEFAULT = 100_000_000
 INTAKE_CHUNK_SIZE = 64 * 1024
 CONST_TRANSFERT_LOCK_NAME = 'transfert.lock'
 CONST_TRANSFERT_LASTPROCESS_NAME = 'transfert.last'
-CONST_TIMEOUT_JOB = 300
+CONST_TIMEOUT_JOB = 90
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +94,8 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
 
 async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatWeb, fuuid,
                                  path_fichiers: pathlib.Path, transaction: Optional[dict] = None,
-                                 batch_size=BATCH_INTAKE_UPLOAD_DEFAULT) -> aiohttp.ClientResponse:
+                                 batch_size=BATCH_INTAKE_UPLOAD_DEFAULT,
+                                 stop_event: Optional[asyncio.Event] = None) -> aiohttp.ClientResponse:
     ssl_context = etat_web.ssl_context
     url_consignation = await asyncio.wait_for(etat_web.get_url_consignation(), timeout=5)
     url_fichier = f'{url_consignation}/fichiers_transfert/{fuuid}'
@@ -105,7 +106,8 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
 
     headers = {'x-fuuid': fuuid}
 
-    stop_event = asyncio.Event()
+    if stop_event is None:
+        stop_event = asyncio.Event()
     etat_upload = EtatUploadParts(fuuid, liste_parts, stop_event, 0)
     while not etat_upload.done:
         position = etat_upload.position
@@ -193,6 +195,15 @@ class IntakeFichiers(IntakeHandler):
     async def configurer(self):
         return await super().configurer()
 
+    async def touch_thread(self, path_locks: list[pathlib.Path], stop_event: asyncio.Event):
+        while stop_event.is_set() is False:
+            for path_lock in path_locks:
+                path_lock.touch()
+            try:
+                await asyncio.wait_for(stop_event.wait(), 20)
+            except asyncio.TimeoutError:
+                pass
+
     async def traiter_prochaine_job(self) -> Optional[dict]:
         try:
             repertoires = repertoires_par_date(self.__path_intake, timeout=CONST_TIMEOUT_JOB)
@@ -202,11 +213,16 @@ class IntakeFichiers(IntakeHandler):
             self.__logger.debug("traiter_prochaine_job Traiter job intake fichier pour fuuid %s" % fuuid)
             path_lock = pathlib.Path(path_repertoire, CONST_TRANSFERT_LOCK_NAME)
             path_last = pathlib.Path(path_repertoire, CONST_TRANSFERT_LASTPROCESS_NAME)
+            stop_event = asyncio.Event()
             with FileLock(path_lock, lock_timeout=CONST_TIMEOUT_JOB):
-                path_repertoire.touch()  # Touch pour mettre a la fin en cas de probleme de traitement
-                path_last.touch()
                 job = IntakeJob(fuuid, path_repertoire)
-                response = await self.traiter_job(job)
+                # Creer une thread qui fait un touch sur les locks regulierement. Empeche autres process
+                # de prendre possession de la job d'intake durant un traitement prolonge
+                touch_thread = self.touch_thread([path_repertoire, path_lock, path_last], stop_event)
+                # Thread de traitement. Set le stop_event a la fin du traitement
+                traiter_thread = self.traiter_job(job, stop_event)
+                # Attendre traitement
+                await asyncio.gather(touch_thread, traiter_thread)
         except IndexError:
             return None  # Condition d'arret de l'intake
         except FileLockedException:
@@ -224,7 +240,7 @@ class IntakeFichiers(IntakeHandler):
     async def annuler_job(self, job: dict, emettre_evenement=False):
         raise NotImplementedError('must override')
 
-    async def traiter_job(self, job):
+    async def traiter_job(self, job, done_event: asyncio.Event):
         await self.handle_retries(job)
 
         timeout = aiohttp.ClientTimeout(connect=20)
@@ -237,7 +253,7 @@ class IntakeFichiers(IntakeHandler):
 
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction)
+                response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction, stop_event = self._stop_event)
 
             if response.status == 202:
                 # Le fichier et recu et valide, supprimer le repertoire de la job
@@ -257,6 +273,8 @@ class IntakeFichiers(IntakeHandler):
                     "traiter_job Le fichier %s est corrompu sur le serveur, tenter de re-uploader la job %s plus tard" % (job.fuuid, job.path_job))
             else:
                 raise cre
+        finally:
+            done_event.set()
 
         if supprimer_job:
             shutil.rmtree(job.path_job, ignore_errors=True)
