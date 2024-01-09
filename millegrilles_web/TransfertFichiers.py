@@ -70,7 +70,9 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
 
     # Verifier s'il faut skipper des bytes
     if input_stream and position_fichier and etat_upload.position != position_fichier:
-        skip_bytes_len = position_fichier - etat_upload.position
+        skip_bytes_len = etat_upload.position - position_fichier
+        if skip_bytes_len < 0:
+            raise ValueError("Mauvaise position initiale")
         input_stream.seek(skip_bytes_len)
 
     while input_stream and taille_uploade < limit:
@@ -137,11 +139,17 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
             # Filtrer toutes les positions qui sont deja traitees
             parts_a_traiter = liste_parts
             liste_parts = list()
+            part_initiale = None  # Conserver part a utiliser pour resume
             for part in parts_a_traiter:
                 position = int(part.name.split('.')[0])
                 if position >= position_part_initial:
                     # Conserver
+                    if part_initiale is not None:
+                        liste_parts.append(part_initiale)
+                        part_initiale = None
                     liste_parts.append(part)
+                else:
+                    part_initiale = part
 
         etat_upload = EtatUploadParts(fuuid, liste_parts, stop_event, position=position_part_initial)
         while not etat_upload.done:
