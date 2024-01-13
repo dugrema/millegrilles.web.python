@@ -26,7 +26,7 @@ class SocketIoHandler:
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self._server = server
         self._stop_event = stop_event
-        self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect)
+        self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect, cors_allowed_origins='*')
 
         self.__subscription_handler = SocketIoSubscriptions(self, self._stop_event)
 
@@ -335,12 +335,12 @@ class SocketIoHandler:
         async with self._semaphore_requetes:
             return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
-    async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
+    async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, nowait=False):
         async with self._semaphore_commandes:
-            return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe)
+            return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=nowait)
 
     async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str, exchange: Optional[str] = None,
-                                 producer=None, enveloppe=None):
+                                 producer=None, enveloppe=None, nowait=False):
         """
 
         :param type_message:
@@ -382,13 +382,16 @@ class SocketIoHandler:
                                                       exchange=exchange, noformat=True)
         elif type_message == 'commande':
             reponse = await producer.executer_commande(message, domaine=domaine, action=action, partition=partition,
-                                                       exchange=exchange, noformat=True)
+                                                       exchange=exchange, noformat=True, nowait=nowait)
         else:
             raise ValueError('Type de message non supporte : %s' % type_message)
         # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
 
-        parsed = reponse.parsed
-        return parsed['__original']
+        try:
+            parsed = reponse.parsed
+            return parsed['__original']
+        except AttributeError:
+            return None
 
     async def ajouter_sid_room(self, sid: str, room: str):
         self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
