@@ -46,7 +46,8 @@ class SocketIoHandler:
         return self.__subscription_handler
 
     async def setup(self):
-        self._sio.attach(self._server.app, socketio_path=f'{self._server.get_nom_app()}/socket.io')
+        socketio_path = f'{self._server.get_nom_app()}/socket.io'
+        self._sio.attach(self._server.app, socketio_path=socketio_path)
         await self._preparer_socketio_events()
 
     async def _preparer_socketio_events(self):
