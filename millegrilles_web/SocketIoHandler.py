@@ -389,8 +389,9 @@ class SocketIoHandler:
         # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
 
         try:
-            parsed = reponse.parsed
-            return parsed['__original']
+            # parsed = reponse.parsed
+            # return parsed['__original']
+            return reponse.original
         except AttributeError:
             return None
 
