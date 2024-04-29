@@ -1,10 +1,12 @@
 import argparse
 import asyncio
+import datetime
 import logging
 
 from typing import Optional
 
 from millegrilles_messages.MilleGrillesConnecteur import MilleGrillesConnecteur
+from millegrilles_messages.docker.Entretien import TacheEntretien
 
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
 from millegrilles_web.EtatWeb import EtatWeb
@@ -23,7 +25,7 @@ class WebAppMain:
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
         self.__args = self.parse()
         self.__config = ConfigurationApplicationWeb()
-        self.__etat = EtatWeb(self.__config)
+        self.__etat = self.init_etat()
 
         self._rabbitmq_dao: Optional[MilleGrillesConnecteur] = None
         self._web_server: Optional[WebServer] = None
@@ -35,6 +37,9 @@ class WebAppMain:
         self.__loop = None
         self._stop_event = None
 
+    def init_etat(self):
+        return EtatWeb(self.__config)
+
     async def configurer(self):
         self.__loop = asyncio.get_event_loop()
         self._stop_event = asyncio.Event()
@@ -44,6 +49,14 @@ class WebAppMain:
         self.__config.nb_reply_correlation_max = self.nb_reply_correlation_max
 
         await self.__etat.reload_configuration()
+
+        self.__etat.ajouter_tache_entretien(
+            TacheEntretien(datetime.timedelta(minutes=10), self.__etat.charger_consignation))
+        self.__etat.ajouter_tache_entretien(
+            TacheEntretien(datetime.timedelta(minutes=10), self.__etat.charger_cles_chiffrage))
+        self.__etat.ajouter_tache_entretien(
+            TacheEntretien(datetime.timedelta(minutes=20), self.__etat.nettoyer_certificats_stale))
+
         if self.args.fichiers:
             self.__logger.info("Activation de la reception de fichiers")
             self.__intake_fichiers = IntakeFichiers(self._stop_event, self.__etat)

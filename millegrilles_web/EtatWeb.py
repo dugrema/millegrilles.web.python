@@ -59,7 +59,7 @@ class EtatWeb(EtatInstance):
         await asyncio.wait_for(producer.producer_pret().wait(), 30)
 
         reponse = await producer.executer_requete(
-            {}, 'CoreTopologie', 'getConsignationFichiers', exchange="2.prive")
+            {}, 'CoreTopologie', 'getConsignationFichiers', exchange="1.public")
 
         try:
             consignation_url = reponse.parsed['consignation_url']
