@@ -52,10 +52,6 @@ class WebAppMain:
 
         self.__etat.ajouter_tache_entretien(
             TacheEntretien(datetime.timedelta(minutes=10), self.__etat.charger_consignation))
-        self.__etat.ajouter_tache_entretien(
-            TacheEntretien(datetime.timedelta(minutes=10), self.__etat.charger_cles_chiffrage))
-        self.__etat.ajouter_tache_entretien(
-            TacheEntretien(datetime.timedelta(minutes=20), self.__etat.nettoyer_certificats_stale))
 
         if self.args.fichiers:
             self.__logger.info("Activation de la reception de fichiers")
