@@ -115,6 +115,14 @@ class WebAppMain:
     def socket_io_handler(self):
         return self._web_server.socket_io_handler
 
+    @property
+    def app(self):
+        return self._web_server.app
+
+    @property
+    def app_path(self):
+        return self._web_server.app_path
+
     def parse(self) -> argparse.Namespace:
         parser = argparse.ArgumentParser(description="Demarrer le serveur d'applications web pour MilleGrilles")
         parser.add_argument(
