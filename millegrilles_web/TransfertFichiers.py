@@ -103,7 +103,8 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
 
 
 async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatWeb, fuuid,
-                                 path_fichiers: pathlib.Path, transaction: Optional[dict] = None,
+                                 path_fichiers: pathlib.Path,
+                                 transaction: Optional[dict] = None, cles: Optional[dict] = None,
                                  batch_size=BATCH_INTAKE_UPLOAD_DEFAULT,
                                  stop_event: Optional[asyncio.Event] = None) -> aiohttp.ClientResponse:
     ssl_context = etat_web.ssl_context
@@ -169,7 +170,7 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
                 if session_response is not None:
                     session_response.release()
 
-    contenu = {'transaction': transaction}
+    contenu = {'transaction': transaction, 'cles': cles}
 
     with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_ETAT).open('rt') as fichier:
         contenu['etat'] = json.load(fichier)
@@ -193,9 +194,10 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
 
 class IntakeJob:
 
-    def __init__(self, fuuid: str, path_job: pathlib.Path):
+    def __init__(self, fuuid: str, path_job: pathlib.Path, cles: Optional[dict] = None):
         self.fuuid = fuuid
         self.path_job = path_job
+        self.cles = cles
 
 
 class IntakeFichiers(IntakeHandler):
@@ -261,7 +263,12 @@ class IntakeFichiers(IntakeHandler):
             path_last = pathlib.Path(path_repertoire, CONST_TRANSFERT_LASTPROCESS_NAME)
             stop_event = asyncio.Event()
             with FileLock(path_lock, lock_timeout=CONST_TIMEOUT_JOB):
-                job = IntakeJob(fuuid, path_repertoire)
+                try:
+                    with open(pathlib.Path(path_repertoire, ConstantesWeb.FICHIER_CLES), 'rt') as fichier:
+                        cles = json.load(fichier)
+                except FileNotFoundError:
+                    cles = None
+                job = IntakeJob(fuuid, path_repertoire, cles)
                 # Creer une thread qui fait un touch sur les locks regulierement. Empeche autres process
                 # de prendre possession de la job d'intake durant un traitement prolonge
                 touch_thread = self.touch_thread([path_repertoire, path_lock, path_last], stop_event)
@@ -293,6 +300,10 @@ class IntakeFichiers(IntakeHandler):
             transaction = job.transaction
         except AttributeError:
             transaction = None
+        try:
+            cles = job.cles
+        except AttributeError:
+            cles = None
 
         supprimer_job = False
 
@@ -302,7 +313,8 @@ class IntakeFichiers(IntakeHandler):
             for retry in range(0, 5):
                 try:
                     async with aiohttp.ClientSession(timeout=timeout) as session:
-                        response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job, transaction, stop_event = self._stop_event)
+                        response = await uploader_fichier_parts(session, self._etat_instance, job.fuuid, job.path_job,
+                                                                transaction, cles, stop_event=self._stop_event)
                     break  # Done
                 except aiohttp.ClientOSError as ose:
                     if ose.errno in [1, 104]:
@@ -434,7 +446,7 @@ class IntakeFichiers(IntakeHandler):
             producer.executer_commande(
                 cles,
                 action=routage['action'], domaine=routage['domaine'], partition=routage.get('partition'),
-                exchange=Constantes.SECURITE_PRIVE,
+                exchange=Constantes.SECURITE_PUBLIC,
                 timeout=60,
                 noformat=True
             )
@@ -615,6 +627,14 @@ class ReceptionFichiersMiddleware:
                 except KeyError:
                     pass
 
+                try:
+                    cles = body['cles']
+                    await self.__etat.validateur_message.verifier(cles)  # Lance exception si echec verification
+                    path_cles = pathlib.Path(path_upload, ConstantesWeb.FICHIER_CLES)
+                    with open(path_cles, 'wt') as fichier:
+                        json.dump(cles, fichier)
+                except KeyError:
+                    pass
             else:
                 # Sauvegarder etat.json sans body
                 etat = {'hachage': batch_id, 'retryCount': 0, 'created': int(datetime.datetime.utcnow().timestamp()*1000)}
@@ -800,6 +820,9 @@ class ReceptionFichiersMiddleware:
             )
         finally:
             self.__logger.info("Thread transfert fichiers arrete")
+
+    async def ajouter_upload(self, path_upload: pathlib.Path):
+        await self.__intake.ajouter_upload(path_upload)
 
 
 def valider_hachage_upload_parts(path_upload: pathlib.Path, hachage: str):
