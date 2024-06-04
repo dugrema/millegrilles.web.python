@@ -36,7 +36,7 @@ class WebServer:
         self._app = web.Application()
         self.__configuration = ConfigurationWeb()
         self.__ssl_context: Optional[SSLContext] = None
-        self._redis_session: Optional[aioredis.Redis] = None
+        # self._redis_session: Optional[aioredis.Redis] = None
         self._socket_io_handler: Optional[SocketIoHandler] = None
 
         self._semaphore_web_threads = asyncio.BoundedSemaphore(value=10)
