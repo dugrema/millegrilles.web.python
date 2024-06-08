@@ -102,14 +102,47 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
             await etat_upload.cb_activite()
 
 
+async def get_hebergement_jwt_readwrite(etat_web: EtatWeb):
+    consignation = await etat_web.get_consignation()
+    rafraichir = True
+    expiration_courante = datetime.datetime.utcnow() - datetime.timedelta(minutes=2)
+    if consignation.jwt_expiration is not None:
+        rafraichir = consignation.jwt_expiration > expiration_courante
+
+    jwt_readwrite = consignation.jwt_readwrite
+    if jwt_readwrite is None:
+        rafraichir = True
+
+    if rafraichir:
+        producer = await asyncio.wait_for(etat_web.producer_wait(), 3)
+        idmg = consignation.instance_id
+        requete = {'idmg': idmg, 'readwrite': True}
+        reponse = await producer.executer_requete(
+            requete, 'CoreTopologie', 'getTokenHebergement', exchange=Constantes.SECURITE_PUBLIC, timeout=15)
+        jwt_readwrite = reponse.parsed['jwt']
+
+        consignation.jwt_readwrite = jwt_readwrite
+        consignation.jwt_readonly = None
+        # TODO Recuperer expiration du JWT
+        consignation.jwt_expiration = datetime.datetime.utcnow() + datetime.timedelta(minutes=5)
+
+    return jwt_readwrite
+
+
 async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatWeb, fuuid,
                                  path_fichiers: pathlib.Path,
                                  transaction: Optional[dict] = None, cles: Optional[dict] = None,
                                  batch_size=BATCH_INTAKE_UPLOAD_DEFAULT,
                                  stop_event: Optional[asyncio.Event] = None) -> aiohttp.ClientResponse:
     ssl_context = etat_web.ssl_context
-    url_consignation = await asyncio.wait_for(etat_web.get_url_consignation(), timeout=5)
-    url_fichier = f'{url_consignation}/fichiers_transfert/{fuuid}'
+    # url_consignation = await asyncio.wait_for(etat_web.get_url_consignation(), timeout=5)
+    info_consignation = await asyncio.wait_for(etat_web.get_consignation(), timeout=5)
+    url_consignation = info_consignation.url
+    type_store = info_consignation.type_store
+    if type_store == 'heberge':
+        base_url_fichiers = f'{url_consignation}/fichiers'
+    else:
+        base_url_fichiers = f'{url_consignation}/fichiers_transfert'
 
     liste_parts = list()
     for position_part in sort_parts(path_fichiers):
@@ -117,8 +150,12 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
 
     headers = {'x-fuuid': fuuid}
 
+    if type_store == 'heberge':
+        jwt_readwrite = await get_hebergement_jwt_readwrite(etat_web)
+        headers['X-jwt'] = jwt_readwrite
+
     # Verifier si le fichier existe deja et si la job d'upload est deja partiellement uploadee
-    url_verifier_job = f'{url_consignation}/fichiers_transfert/job/{fuuid}'
+    url_verifier_job = f'{base_url_fichiers}/job/{fuuid}'
     reponse_existant = await session.get(url_verifier_job, ssl=ssl_context, headers=headers)
     if reponse_existant.status == 404:
         # Ok, la job est inconnue. On upload du debut.
@@ -133,6 +170,7 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
         return reponse_existant  # En cours de traitement (intake)
     else:
         err_msg = f"Erreur debut upload fuuid {fuuid}, status {reponse_existant.status}"
+        LOGGER.error(err_msg)
         raise Exception(err_msg)
 
     if stop_event is None:
@@ -159,7 +197,7 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
         while not etat_upload.done:
             position = etat_upload.position
             feeder_coro = feed_filepart2(etat_upload, limit=batch_size)
-            session_coro = session.put(f'{url_fichier}/{position}', ssl=ssl_context, headers=headers, data=feeder_coro)
+            session_coro = session.put(f'{base_url_fichiers}/{fuuid}/{position}', ssl=ssl_context, headers=headers, data=feeder_coro)
 
             # Uploader chunk
             session_response = None
@@ -170,23 +208,26 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
                 if session_response is not None:
                     session_response.release()
 
-    contenu = {'transaction': transaction, 'cles': cles}
+    contenu = dict()
+
+    if type_store != 'heberge':
+        contenu = {'transaction': transaction, 'cles': cles}
+
+        # Charger fichiers de transaction disponible
+        if transaction is None:
+            try:
+                with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_TRANSACTION).open('rt') as fichier:
+                    contenu['transaction'] = json.load(fichier)
+            except OSError as e:
+                if e.errno == errno.ENOENT:
+                    pass  # OK
+                else:
+                    raise e
 
     with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_ETAT).open('rt') as fichier:
         contenu['etat'] = json.load(fichier)
 
-    # Charger fichiers de transaction disponible
-    if transaction is None:
-        try:
-            with pathlib.Path(path_fichiers, ConstantesWeb.FICHIER_TRANSACTION).open('rt') as fichier:
-                contenu['transaction'] = json.load(fichier)
-        except OSError as e:
-            if e.errno == errno.ENOENT:
-                pass  # OK
-            else:
-                raise e
-
-    async with session.post(url_fichier, json=contenu, ssl=ssl_context, headers=headers) as resp:
+    async with session.post(f'{base_url_fichiers}/{fuuid}', json=contenu, ssl=ssl_context, headers=headers) as resp:
         resp.raise_for_status()
 
     return resp
@@ -285,7 +326,7 @@ class IntakeFichiers(IntakeHandler):
         except aiohttp.ClientResponseError as e:
             raise e  # Erreur fatale cote serveur (e.g. offline)
         except Exception as e:
-            self.__logger.exception("traiter_prochaine_job Erreur traitement job download")
+            self.__logger.exception("traiter_prochaine_job Erreur traitement job")
             return {'ok': False, 'err': str(e)}
 
         return {'ok': True}
@@ -347,9 +388,10 @@ class IntakeFichiers(IntakeHandler):
                     "traiter_job Le fichier %s est corrompu sur le serveur, tenter de re-uploader la job %s plus tard" % (job.fuuid, job.path_job))
             else:
                 raise cre
-        except Exception:
+        except Exception as e:
             # Pour toute autre exception, on incremente le retry counter
             await self.handle_retries(job)
+            raise e
         finally:
             done_event.set()
 

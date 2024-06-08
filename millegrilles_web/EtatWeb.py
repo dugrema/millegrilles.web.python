@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import datetime
 
 from typing import Optional
 
@@ -7,6 +8,17 @@ from ssl import SSLContext
 
 from millegrilles_messages.MilleGrillesConnecteur import EtatInstance
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
+
+
+class InformationConsignation:
+
+    def __init__(self, url: str, type_store: str, instance_id: str):
+        self.url = url
+        self.type_store = type_store
+        self.instance_id = instance_id
+        self.jwt_readonly: Optional[str] = None
+        self.jwt_readwrite: Optional[str] = None
+        self.jwt_expiration: Optional[datetime.datetime] = None
 
 
 class EtatWeb(EtatInstance):
@@ -17,7 +29,8 @@ class EtatWeb(EtatInstance):
 
         self.__ssl_context: Optional[SSLContext] = None
 
-        self.__url_consignation: Optional[str] = None
+        # self.__url_consignation: Optional[str] = None
+        self.__consignation: Optional[InformationConsignation] = None
         self.__event_consignation = asyncio.Event()
 
     async def reload_configuration(self):
@@ -63,12 +76,21 @@ class EtatWeb(EtatInstance):
 
         try:
             consignation_url = reponse.parsed['consignation_url']
-            self.__url_consignation = consignation_url
+            type_store = reponse.parsed['type_store']
+            instance_id = reponse.parsed['instance_id']
+            # self.__url_consignation = consignation_url
+            self.__consignation = InformationConsignation(consignation_url, type_store, instance_id)
             self.__event_consignation.set()
             return consignation_url
         except Exception as e:
             self.__logger.exception("Erreur chargement URL consignation")
 
     async def get_url_consignation(self) -> str:
+        raise NotImplementedError('obsolete')
+        # await self.__event_consignation.wait()
+        # return self.__url_consignation
+
+    async def get_consignation(self) -> InformationConsignation:
         await self.__event_consignation.wait()
-        return self.__url_consignation
+        return self.__consignation
+
