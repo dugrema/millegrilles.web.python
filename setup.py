@@ -18,6 +18,7 @@ setup(
         'aiohttp>=3.8.1,<4',
         'requests>=2.28.1,<3',
         'pyjwt',
-        'python-socketio>=5.9,<6'
+        'python-socketio>=5.9,<6',
+        'aiohttp-session==2.12.0'
     ]
 )
