@@ -1,5 +1,4 @@
 import aiohttp_session
-import aioredis
 import asyncio
 import logging
 import pathlib
