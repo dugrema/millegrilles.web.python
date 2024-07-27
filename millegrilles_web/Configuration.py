@@ -13,6 +13,7 @@ CONST_WEBAPP_PARAMS = [
     Constantes.PARAM_REDIS_USERNAME,
     Constantes.PARAM_REDIS_PASSWORD_PATH,
     Constantes.PARAM_REDIS_SESSION_DATABASE,
+    Constantes.PARAM_EXCHANGE_DEFAULT,
 ]
 
 CONST_WEB_PARAMS = [
@@ -34,6 +35,7 @@ class ConfigurationApplicationWeb(ConfigurationAbstract):
         self.redis_password: Optional[str] = None
         self.redis_session_db = Constantes.REDIS_SESSION_DATABASE
         self.nb_reply_correlation_max = 20
+        self.exchange_default = '2.prive'
 
     def get_params_list(self) -> list:
         params = super().get_params_list()
@@ -61,6 +63,7 @@ class ConfigurationApplicationWeb(ConfigurationAbstract):
                     self.redis_password = line
                     break
         self.redis_session_db = int(dict_params.get(Constantes.PARAM_REDIS_SESSION_DATABASE) or self.redis_session_db)
+        self.exchange_default = dict_params.get(Constantes.PARAM_EXCHANGE_DEFAULT) or self.exchange_default
 
     @property
     def dir_staging(self):

@@ -330,7 +330,7 @@ class SocketIoHandler:
 
     @property
     def exchange_default(self):
-        raise NotImplementedError('must implement')
+        return self.etat.configuration.exchange_default
 
     async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
         async with self._semaphore_requetes:
