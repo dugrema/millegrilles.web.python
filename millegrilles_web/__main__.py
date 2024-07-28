@@ -16,7 +16,7 @@ LOGGING_NAMES.extend(LOGGING_NAMES_WEB)
 
 # Constants
 APP_NAME = 'webapi'
-WEBAPP_PATH = '/webapi'
+WEBAPP_PATH = '/millegrilles'
 
 
 class MappedWebAppMain(WebAppMain):
