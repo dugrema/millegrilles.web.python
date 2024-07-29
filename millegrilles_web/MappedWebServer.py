@@ -4,7 +4,7 @@ from millegrilles_web.WebServer import WebServer, EtatWeb
 from millegrilles_web.MappedCommandHandler import MappedCommandHandler
 from millegrilles_web.MappedSocketIoHandler import MappedSocketIoHandler
 
-APP_NAME = 'webapi'
+APP_NAME = 'millegrilles'
 
 
 class MappedWebServer(WebServer):

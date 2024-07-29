@@ -1,7 +1,10 @@
 import asyncio
 import logging
 
+from millegrilles_messages.messages import Constantes
 from millegrilles_web.SocketIoHandler import SocketIoHandler
+from millegrilles_messages.messages.Hachage import hacher
+from millegrilles_messages.certificats.Generes import EnveloppeCsr
 
 
 class MappedSocketIoHandler(SocketIoHandler):
@@ -20,6 +23,11 @@ class MappedSocketIoHandler(SocketIoHandler):
         await super()._preparer_socketio_events()
         # Only initial handler, allows receiving the mapping configuration after authentication.
         self._sio.on('_map', handler=self.map_connection)
+
+        # Add public handlers for logging into the application.
+        self._sio.on('inscrireUsager', handler=self.inscrire_usager)
+        self._sio.on('login_upgrade', handler=self.upgrade)
+        # self._sio.on('ajouterCsrRecovery', handler=self.ajouter_csr_recovery)
 
     async def map_connection(self, sid: str, message: dict):
         async with self._semaphore_mapping:
@@ -56,3 +64,41 @@ class MappedSocketIoHandler(SocketIoHandler):
 
     async def handle_unsubscribe(self, sid: str, request: dict):
         raise NotImplementedError('todo')
+
+    async def inscrire_usager(self, _sid: str, message: dict):
+
+        nom_usager = message['nomUsager']
+        idmg = self.etat.clecertificat.enveloppe.idmg
+
+        # Verifier CSR
+        try:
+            csr = EnveloppeCsr.from_str(message['csr'])  # Note : valide le CSR, lance exception si erreur
+        except Exception:
+            reponse = {'ok': False, 'err': 'Signature CSR invalide'}
+            reponse, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+            return reponse
+
+        # Calculer fingerprintPk
+        fingperint_pk = csr.get_fingerprint_pk()  # Le fingerprint de la cle publique == la cle (32 bytes)
+
+        # Generer nouveau user_id
+        params_user_id = ':'.join([nom_usager, idmg, fingperint_pk])
+        user_id = hacher(params_user_id, hashing_code='blake2s-256', encoding='base58btc')
+
+        commande = {
+            'csr': message['csr'],
+            'nomUsager': nom_usager,
+            'userId': user_id,
+            'securite': '1.public',
+            'fingerprint_pk': fingperint_pk
+        }
+
+        producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+        resultat = await producer.executer_commande(
+            commande,
+            domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES, action='inscrireUsager',
+            exchange=Constantes.SECURITE_PRIVE)
+
+        reponse_parsed = resultat.parsed
+        reponse = reponse_parsed['__original']
+        return reponse

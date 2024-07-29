@@ -171,8 +171,9 @@ class SocketIoHandler:
                 # la meme room. Permet de faire un evict au besoin.
                 await self._sio.enter_room(sid, 'user.%s' % user_id)
             except KeyError:
-                self.__logger.error("sio_connect SID:%s sans parametres request user_id/user_name (pas de session)" % sid)
-                raise ConnectionRefusedError('authentication failed')
+                self.__logger.debug("sio_connect SID:%s sans parametres request user_id/user_name (non authentifie)" % sid)
+                # raise ConnectionRefusedError('authentication failed')
+                return True
 
             async with self._sio.session(sid) as session:
                 session[ConstantesWeb.SESSION_USER_NAME] = user_name
