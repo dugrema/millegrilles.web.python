@@ -27,7 +27,8 @@ class MappedSocketIoHandler(SocketIoHandler):
         await super()._preparer_socketio_events()
         # Add public handlers for logging into the application.
         self._sio.on('authentication_register', handler=self.register)
-        self._sio.on('authentication_authenticate', handler=self.upgrade)
+        self._sio.on('authentication_authenticate', handler=self.authenticate)
+        self._sio.on('authentication_challenge_webauthn', handler=self.generate_challenge_webauthn)
         # self._sio.on('authentication_recovery', handler=self.ajouter_csr_recovery)
 
         # Add private handler for routed messages with the provided api configuration.
@@ -73,7 +74,12 @@ class MappedSocketIoHandler(SocketIoHandler):
         self.__mapping_files[sid] = api_map
 
     async def handle_routed_message(self, sid, message: dict):
-        mapping = self.__mapping_files[sid]
+        try:
+            mapping = self.__mapping_files[sid]
+        except KeyError:
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+
         defaults = mapping['defaults']
         default_domain = defaults['domain']
         default_exchange = defaults['exchange']
@@ -101,7 +107,7 @@ class MappedSocketIoHandler(SocketIoHandler):
     async def handle_unsubscribe(self, sid: str, request: dict):
         raise NotImplementedError('todo')
 
-    async def upgrade(self, sid: str, message: dict):
+    async def authenticate(self, sid: str, message: dict):
         response = await super().upgrade(sid, message)
         response_content = json.loads(response['contenu'])
         if response_content.get('ok') is not True:
@@ -155,3 +161,46 @@ class MappedSocketIoHandler(SocketIoHandler):
         reponse_parsed = resultat.parsed
         reponse = reponse_parsed['__original']
         return reponse
+
+    async def generate_challenge_webauthn(self, sid: str, message: dict):
+        reponse_challenge = await self.executer_commande(
+            sid, message,
+            domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
+            action='genererChallenge',
+            exchange=Constantes.SECURITE_PRIVE
+        )
+
+        # Intercepter la reponse - on ne veut pas transmettre l'information passkey, juste le challenge
+        reponse_contenu = json.loads(reponse_challenge['contenu'])
+
+        reponse_usager = dict()
+
+        try:
+            authentication_challenge = reponse_contenu['authentication_challenge']
+            passkey_authentication = reponse_contenu['passkey_authentication']
+
+            # Conserver la passkey dans la session
+            async with self._sio.session(sid) as session:
+                session['authentication_challenge'] = authentication_challenge
+                session['passkey_authentication'] = passkey_authentication
+
+            reponse_usager['authentication_challenge'] = authentication_challenge
+        except KeyError:
+            pass  # Pas de challenge d'authentification
+
+        try:
+            reponse_usager['registration_challenge'] = reponse_contenu['registration_challenge']
+        except KeyError:
+            pass  # Pas de challenge de registration
+
+        try:
+            # Conserver le challenge de delegation
+            session['delegation_challenge'] = reponse_contenu['challenge']
+            reponse_usager['delegation_challenge'] = reponse_contenu['challenge']
+        except KeyError:
+            pass  # Pas de challenge de delegation
+
+        reponse_usager, correlation = self.etat.formatteur_message.signer_message(
+            Constantes.KIND_REPONSE, reponse_usager)
+
+        return reponse_usager
