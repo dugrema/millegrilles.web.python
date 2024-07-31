@@ -29,6 +29,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         self._sio.on('authentication_register', handler=self.register)
         self._sio.on('authentication_authenticate', handler=self.authenticate)
         self._sio.on('authentication_challenge_webauthn', handler=self.generate_challenge_webauthn)
+        self._sio.on('request_application_list', handler=self.request_application_list)
         # self._sio.on('authentication_recovery', handler=self.ajouter_csr_recovery)
 
         # Add private handler for routed messages with the provided api configuration.
@@ -204,3 +205,19 @@ class MappedSocketIoHandler(SocketIoHandler):
             Constantes.KIND_REPONSE, reponse_usager)
 
         return reponse_usager
+
+    async def request_application_list(self, sid: str, message: dict):
+        reponse = await self.executer_requete(sid, message, Constantes.DOMAINE_CORE_TOPOLOGIE, 'listeApplicationsDeployees')
+
+        # Ajouter un message signe localement pour prouver l'identite du serveur (instance_id)
+        info_serveur = self.etat.formatteur_message.signer_message(
+            Constantes.KIND_REPONSE,
+            dict(),
+            domaine='maitredescomptes',
+            action='identite',
+            ajouter_chaine_certs=True
+        )[0]
+
+        reponse['attachements'] = {'serveur': info_serveur}
+
+        return reponse
