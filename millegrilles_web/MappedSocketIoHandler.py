@@ -29,6 +29,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         self._sio.on('authentication_register', handler=self.register)
         self._sio.on('authentication_authenticate', handler=self.authenticate)
         self._sio.on('authentication_challenge_webauthn', handler=self.generate_challenge_webauthn)
+        self._sio.on('authentication_addrecoverycsr', handler=self.add_recovery_csr)
         self._sio.on('request_application_list', handler=self.request_application_list)
         # self._sio.on('authentication_recovery', handler=self.ajouter_csr_recovery)
 
@@ -221,3 +222,20 @@ class MappedSocketIoHandler(SocketIoHandler):
         reponse['attachements'] = {'serveur': info_serveur}
 
         return reponse
+
+    async def add_recovery_csr(self, _sid: str, message: dict):
+        command = {
+            'nomUsager': message['nomUsager'],
+            'csr': message['csr'],
+        }
+
+        producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+        result = await producer.executer_commande(
+            command,
+            domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
+            action='ajouterCsrRecovery',
+            exchange=Constantes.SECURITE_PRIVE)
+
+        parsed_response = result.parsed
+        response = parsed_response['__original']
+        return response
