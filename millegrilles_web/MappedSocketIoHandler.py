@@ -10,6 +10,8 @@ from millegrilles_web.SocketIoHandler import SocketIoHandler
 REQUESTS_DICT = 'requests_dict'
 COMMANDS_DICT = 'commands_dict'
 
+AUTHORIZED_WEBAPI_IDMG = ['zeYncRqEqZ6eTEmUZ8whJFuHG796eSvCTWE4M432izXrp22bAtwGm7Jf']
+
 
 class MappedSocketIoHandler(SocketIoHandler):
 
@@ -44,9 +46,17 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         if mapping.get('sig'):
             # Verify signed api mapping file
-            raise NotImplementedError('todo')
+            cert = await self.etat.validateur_message.verifier(mapping, utiliser_date_message=True, utiliser_idmg_message=True)
+            roles = cert.get_roles
+            if 'webapi' not in roles or 'signature' not in roles:
+                raise Exception('The api mapping signature is invalid')
 
-            # api_map = json.loads(mapping['contenu'])
+            # Check that the IDMG of the message is in the allowed lists for webapi signature
+            idmg = cert.idmg
+            if idmg not in AUTHORIZED_WEBAPI_IDMG:
+                raise Exception('Unauthorized signature for webapi')
+
+            api_map = json.loads(mapping['contenu'])
         else:
             if not self.etat.configuration.dev_mode:
                 raise Exception('The api mapping is not signed')
@@ -54,7 +64,7 @@ class MappedSocketIoHandler(SocketIoHandler):
             api_map = mapping
 
         # Extract mapping keys for requests and commands
-        defaults = mapping['defaults']
+        defaults = api_map['defaults']
         default_domain = defaults['domain']
 
         requests = {}
