@@ -3,6 +3,7 @@ import json
 import logging
 
 from millegrilles_messages.messages import Constantes
+from millegrilles_messages.messages.EnveloppeCertificat import EnveloppeCertificat
 from millegrilles_messages.messages.Hachage import hacher
 from millegrilles_messages.certificats.Generes import EnveloppeCsr
 from millegrilles_web.SocketIoHandler import SocketIoHandler
@@ -143,6 +144,18 @@ class MappedSocketIoHandler(SocketIoHandler):
         return reponse_signee
 
     async def handle_subscribe(self, sid: str, request: dict):
+        routing_keys, exchanges, enveloppe = await self.map_subscription(sid, request)
+        response = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=enveloppe)
+        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
+        return signed_response
+
+    async def handle_unsubscribe(self, sid: str, request: dict):
+        routing_keys, exchanges, _enveloppe = await self.map_subscription(sid, request)
+        response = await self.unsubscribe(sid, request, routing_keys, exchanges)
+        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
+        return signed_response
+
+    async def map_subscription(self, sid: str, request: dict) -> (list[str], list[str], EnveloppeCertificat):
         try:
             mapping = self.__mapping_files[sid]
         except KeyError:
@@ -174,32 +187,7 @@ class MappedSocketIoHandler(SocketIoHandler):
 
             routing_keys.append(rk)
 
-        response = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=enveloppe)
-        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
-        return signed_response
-
-    async def handle_unsubscribe(self, sid: str, request: dict):
-        raise NotImplementedError('todo')
-        # try:
-        #     mapping = self.__mapping_files[sid]
-        # except KeyError:
-        #     return self.etat.formatteur_message.signer_message(
-        #         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
-        #
-        # contenu = json.loads(request['contenu'])
-        # instance_id = contenu['instanceId']
-        # exchange = contenu['exchange']
-        #
-        # exchanges = [exchange]
-        # routing_keys = [
-        #     f'evenement.instance.{instance_id}.applicationDemarree',
-        #     f'evenement.instance.{instance_id}.applicationArretee',
-        #     f'evenement.instance.{instance_id}.erreurDemarrageApplication',
-        # ]
-        #
-        # reponse = await self.unsubscribe(sid, request, routing_keys, exchanges)
-        # reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
-        # return reponse_signee
+        return routing_keys, exchanges, enveloppe
 
     async def authenticate(self, sid: str, message: dict):
         response = await super().upgrade(sid, message)
