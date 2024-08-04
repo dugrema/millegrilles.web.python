@@ -32,11 +32,16 @@ class MappedSocketIoHandler(SocketIoHandler):
         self._sio.on('authentication_authenticate', handler=self.authenticate)
         self._sio.on('authentication_challenge_webauthn', handler=self.generate_challenge_webauthn)
         self._sio.on('authentication_addrecoverycsr', handler=self.add_recovery_csr)
-        self._sio.on('request_application_list', handler=self.request_application_list)
-        # self._sio.on('authentication_recovery', handler=self.ajouter_csr_recovery)
+        self._sio.on('authentication_subscribe_activation', handler=self.subscribe_activation)
+        self._sio.on('authentication_unsubscribe_activation', handler=self.unsubscribe_activation)
 
         # Add private handler for routed messages with the provided api configuration.
+        self._sio.on('request_application_list', handler=self.request_application_list)
         self._sio.on('route_message', handler=self.handle_routed_message)
+
+        # Private listeners
+        self._sio.on('subscribe', handler=self.handle_subscribe)
+        self._sio.on('unsubscribe', handler=self.handle_unsubscribe)
 
     async def map_connection(self, sid: str, message: dict):
         try:
@@ -113,11 +118,88 @@ class MappedSocketIoHandler(SocketIoHandler):
         else:
             raise Exception('Unsupported message kind')
 
+    async def subscribe_activation(self, sid: str, request: dict):
+        """
+        Subscribes without authentication to listen for the registration of a user certificate.
+        :param sid:
+        :param request:
+        :return:
+        """
+        exchanges = [Constantes.SECURITE_PRIVE]
+        public_key = request['publicKey']
+        routing_keys = [f'evenement.CoreMaitreDesComptes.{public_key}.activationFingerprintPk']
+        # Note : message non authentifie (sans signature). Flag enveloppe=False empeche validation.
+        reponse = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=False, session_requise=False)
+        reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+        return reponse_signee
+
+    async def unsubscribe_activation(self, sid: str, request: dict):
+        # Note : message non authentifie (sans signature)
+        exchanges = [Constantes.SECURITE_PRIVE]
+        public_key = request['publicKey']
+        routing_keys = [f'evenement.CoreMaitreDesComptes.{public_key}.activationFingerprintPk']
+        reponse = await self.unsubscribe(sid, request, routing_keys, exchanges, session_requise=False)
+        reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+        return reponse_signee
+
     async def handle_subscribe(self, sid: str, request: dict):
-        raise NotImplementedError('todo')
+        try:
+            mapping = self.__mapping_files[sid]
+        except KeyError:
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+
+        event_name = request['routage']['action']
+        event_mapping = mapping['subscriptions'][event_name]
+
+        enveloppe = await self.etat.validateur_message.verifier(request)
+        user_id = enveloppe.get_user_id
+
+        if user_id is None:
+            raise Exception('Access denied: no user_id in the certificate')
+
+        exchanges = event_mapping['exchanges']
+
+        routing_keys: list[str] = list()
+        for rk in event_mapping['routingKeys']:
+            rk = rk.replace('{USER_ID}', user_id)
+
+            # Check to ensure no unmapped values remain
+            try:
+                rk.index('{')
+            except ValueError:
+                pass  # Ok
+            else:
+                raise Exception('Routing key not mapped completely: %s', rk)
+
+            routing_keys.append(rk)
+
+        response = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=enveloppe)
+        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
+        return signed_response
 
     async def handle_unsubscribe(self, sid: str, request: dict):
         raise NotImplementedError('todo')
+        # try:
+        #     mapping = self.__mapping_files[sid]
+        # except KeyError:
+        #     return self.etat.formatteur_message.signer_message(
+        #         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+        #
+        # contenu = json.loads(request['contenu'])
+        # instance_id = contenu['instanceId']
+        # exchange = contenu['exchange']
+        #
+        # exchanges = [exchange]
+        # routing_keys = [
+        #     f'evenement.instance.{instance_id}.applicationDemarree',
+        #     f'evenement.instance.{instance_id}.applicationArretee',
+        #     f'evenement.instance.{instance_id}.erreurDemarrageApplication',
+        # ]
+        #
+        # reponse = await self.unsubscribe(sid, request, routing_keys, exchanges)
+        # reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+        # return reponse_signee
 
     async def authenticate(self, sid: str, message: dict):
         response = await super().upgrade(sid, message)

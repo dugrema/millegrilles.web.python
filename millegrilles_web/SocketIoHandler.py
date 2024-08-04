@@ -54,14 +54,12 @@ class SocketIoHandler:
         self._sio.on('connect', handler=self.connect)
         self._sio.on('disconnect', handler=self.disconnect)
 
-        # self._sio.on('subscribe', handler=self.subscribe)
-        # self._sio.on('unsubscribe', handler=self.unsubscribe)
         self._sio.on('genererChallengeCertificat', handler=self.generer_challenge_certificat)
         self._sio.on('getCertificatsMaitredescles', handler=self.get_certificats_maitredescles)
         self._sio.on('getInfoIdmg', handler=self.get_info_idmg)
         self._sio.on('getEtatAuth', handler=self.get_info_idmg)
 
-        # Options 2.prive - pour usager authentifie  # TODO Ajouter verif authentification "if(authScore > 0)"
+        # Options 2.prive - pour usager authentifie
         self._sio.on('upgrade', handler=self.upgrade)
 
         # Obsolete
@@ -269,10 +267,8 @@ class SocketIoHandler:
 
             try:
                 return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
-                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)[0]
             except Exception:
                 self.__logger.exception("subscribe Erreur subscribe")
-                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
                 return {'ok': False}
 
     async def unsubscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]], exchanges: Union[str, list[str]], session_requise=True):
@@ -289,10 +285,8 @@ class SocketIoHandler:
 
             try:
                 return await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
-                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)[0]
             except Exception:
                 self.__logger.exception("subscribe Erreur unsubscribe")
-                # return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False})[0]
                 return {'ok': False}
 
     async def generer_challenge_certificat(self, sid: str):
