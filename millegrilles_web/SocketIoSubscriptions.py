@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import json
 
 from typing import Optional, Union
 
@@ -153,12 +154,21 @@ class SocketIoSubscriptions:
         self.__logger.debug("callback_reply_q RabbitMQ nessage recu : %s" % message)
 
         type_evenement, domaine, partition, action = get_key_parts(message.routing_key)
-        user_id = message.routage.get('user_id')
+        try:
+            user_id = message.routage.get('user_id')
+        except AttributeError:
+            user_id = None  # Default to None - use case of encrypted response as event
+
+        try:
+            original = message.parsed['__original']
+        except TypeError:
+            # Encrypted response
+            original = json.loads(message.contenu)
 
         message_room = {
             'exchange': message.exchange,
             'routingKey': message.routing_key,
-            'message': message.parsed['__original']
+            'message': original
         }
         exchange = message.exchange
 

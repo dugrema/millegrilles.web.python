@@ -168,6 +168,8 @@ class MappedSocketIoHandler(SocketIoHandler):
         enveloppe = await self.etat.validateur_message.verifier(request)
         user_id = enveloppe.get_user_id
 
+        parametres = json.loads(request['contenu'])
+
         if user_id is None:
             raise Exception('Access denied: no user_id in the certificate')
 
@@ -176,6 +178,9 @@ class MappedSocketIoHandler(SocketIoHandler):
         routing_keys: list[str] = list()
         for rk in event_mapping['routingKeys']:
             rk = rk.replace('{USER_ID}', user_id)
+
+            if len(parametres) > 0:
+                rk = rk.format(**parametres)
 
             # Check to ensure no unmapped values remain
             try:
