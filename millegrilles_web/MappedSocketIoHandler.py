@@ -111,7 +111,7 @@ class MappedSocketIoHandler(SocketIoHandler):
             request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
             exchange = request_mapping.get('exchange') or default_exchange
             return await self.executer_requete(sid, message, domain, action, exchange)
-        elif kind == Constantes.KIND_COMMANDE:
+        elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
             exchange = command_mapping.get('exchange') or default_exchange
             nowait = command_mapping.get('nowait')
