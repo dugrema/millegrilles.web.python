@@ -39,6 +39,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         # Add private handler for routed messages with the provided api configuration.
         self._sio.on('request_application_list', handler=self.request_application_list)
         self._sio.on('route_message', handler=self.handle_routed_message)
+        self._sio.on('route_message_stream_response', handler=self.handle_routed_message_stream_response)
 
         # Private listeners
         self._sio.on('subscribe', handler=self.handle_subscribe)
@@ -116,6 +117,43 @@ class MappedSocketIoHandler(SocketIoHandler):
             exchange = command_mapping.get('exchange') or default_exchange
             nowait = command_mapping.get('nowait')
             return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
+        else:
+            raise Exception('Unsupported message kind')
+
+    async def handle_routed_message_stream_response(self, sid, message: dict):
+        try:
+            mapping = self.__mapping_files[sid]
+        except KeyError:
+            return self.etat.formatteur_message.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+
+        defaults = mapping['defaults']
+        default_domain = defaults['domain']
+        default_exchange = defaults['exchange']
+
+        routage = message['routage']
+        action = routage['action']
+        domain = routage.get('domaine') or default_domain
+
+        kind = message['kind']
+        if kind == Constantes.KIND_REQUETE:
+            raise Exception('TODO streaming requetest')  # TODO
+            # request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
+            # if request_mapping.get('stream') is not True:
+            #     return self.etat.formatteur_message.signer_message(
+            #         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
+            # exchange = request_mapping.get('exchange') or default_exchange
+            # return await self.executer_requete(sid, message, domain, action, exchange)
+        elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
+            command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
+            if command_mapping.get('stream') is not True:
+                return self.etat.formatteur_message.signer_message(
+                    Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
+            exchange = command_mapping.get('exchange') or default_exchange
+            nowait = command_mapping.get('nowait')
+            result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True)
+            self.__logger.debug("!! execution command streaming : %s" % result)
+            return False
         else:
             raise Exception('Unsupported message kind')
 
