@@ -38,6 +38,7 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         # Add private handler for routed messages with the provided api configuration.
         self._sio.on('request_application_list', handler=self.request_application_list)
+        self._sio.on('request_userapps_list', handler=self.request_userapps_list)
         self._sio.on('route_message', handler=self.handle_routed_message)
         self._sio.on('route_message_stream_response', handler=self.handle_routed_message_stream_response)
 
@@ -332,6 +333,23 @@ class MappedSocketIoHandler(SocketIoHandler):
 
     async def request_application_list(self, sid: str, message: dict):
         reponse = await self.executer_requete(sid, message, Constantes.DOMAINE_CORE_TOPOLOGIE, 'listeApplicationsDeployees')
+
+        # Ajouter un message signe localement pour prouver l'identite du serveur (instance_id)
+        info_serveur = self.etat.formatteur_message.signer_message(
+            Constantes.KIND_REPONSE,
+            dict(),
+            domaine='maitredescomptes',
+            action='identite',
+            ajouter_chaine_certs=True
+        )[0]
+
+        reponse['attachements'] = {'serveur': info_serveur}
+
+        return reponse
+
+    async def request_userapps_list(self, sid: str, message: dict):
+        reponse = await self.executer_requete(sid, message, Constantes.DOMAINE_CORE_TOPOLOGIE,
+                                              'listeUserappsDeployees')
 
         # Ajouter un message signe localement pour prouver l'identite du serveur (instance_id)
         info_serveur = self.etat.formatteur_message.signer_message(
