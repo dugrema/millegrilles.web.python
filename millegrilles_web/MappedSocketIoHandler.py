@@ -110,14 +110,22 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         kind = message['kind']
         if kind == Constantes.KIND_REQUETE:
-            request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
-            exchange = request_mapping.get('exchange') or default_exchange
-            return await self.executer_requete(sid, message, domain, action, exchange)
+            try:
+                request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
+            except KeyError:
+                return {'ok': False, 'code': 403, 'err': 'Access denied, request %s/%s not allowed' % (domain, action)}
+            else:
+                exchange = request_mapping.get('exchange') or default_exchange
+                return await self.executer_requete(sid, message, domain, action, exchange)
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
-            command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
-            exchange = command_mapping.get('exchange') or default_exchange
-            nowait = command_mapping.get('nowait')
-            return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
+            try:
+                command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
+            except KeyError:
+                return {'ok': False, 'code': 403, 'err': 'Access denied, command %s/%s not allowed' % (domain, action)}
+            else:
+                exchange = command_mapping.get('exchange') or default_exchange
+                nowait = command_mapping.get('nowait')
+                return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
         else:
             raise Exception('Unsupported message kind')
 
