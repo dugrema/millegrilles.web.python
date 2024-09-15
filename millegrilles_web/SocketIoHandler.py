@@ -327,9 +327,26 @@ class SocketIoHandler:
     def exchange_default(self):
         return self.etat.configuration.exchange_default
 
-    async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None):
+    async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, stream=False):
         async with self._semaphore_requetes:
-            return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
+            if stream is True:
+                if producer is None:
+                    producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+
+                # Enregistrer une correlation streaming
+                correlation_id = requete['id']
+
+                async def callback(cb_correlation_id: str, message):
+                    message_parsed = message.original
+                    await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
+
+                self.__logger.info("Stream to correlation_id %s", correlation_id)
+                await producer.ajouter_correlation_callback(correlation_id, callback)
+
+                # Emettre la commande nowait - la reponse va etre acheminee via correlation
+                return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe, nowait=True)
+            else:
+                return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
     async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, nowait=False, stream=False):
         async with self._semaphore_commandes:
@@ -342,8 +359,6 @@ class SocketIoHandler:
 
                 async def callback(cb_correlation_id: str, message):
                     message_parsed = message.original
-                    valeur_response = json.dumps(message_parsed, indent=2)
-                    # self.__logger.info("recu reponse %s, message %s" % (cb_correlation_id, valeur_response))
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
                 await producer.ajouter_correlation_callback(correlation_id, callback)
