@@ -113,19 +113,25 @@ class MappedSocketIoHandler(SocketIoHandler):
             try:
                 request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
             except KeyError:
-                return {'ok': False, 'code': 403, 'err': 'Access denied, request %s/%s not allowed' % (domain, action)}
-            else:
-                exchange = request_mapping.get('exchange') or default_exchange
-                return await self.executer_requete(sid, message, domain, action, exchange)
+                try:
+                    request_mapping = mapping[REQUESTS_DICT]['/'.join(('*', action))]
+                except KeyError:
+                    return {'ok': False, 'code': 403, 'err': 'Access denied, request %s/%s not allowed' % (domain, action)}
+
+            exchange = request_mapping.get('exchange') or default_exchange
+            return await self.executer_requete(sid, message, domain, action, exchange)
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             try:
                 command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
             except KeyError:
-                return {'ok': False, 'code': 403, 'err': 'Access denied, command %s/%s not allowed' % (domain, action)}
-            else:
-                exchange = command_mapping.get('exchange') or default_exchange
-                nowait = command_mapping.get('nowait')
-                return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
+                try:
+                    command_mapping = mapping[COMMANDS_DICT]['/'.join(('*', action))]
+                except KeyError:
+                    return {'ok': False, 'code': 403, 'err': 'Access denied, command %s/%s not allowed' % (domain, action)}
+
+            exchange = command_mapping.get('exchange') or default_exchange
+            nowait = command_mapping.get('nowait')
+            return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
         else:
             raise Exception('Unsupported message kind')
 
@@ -154,12 +160,12 @@ class MappedSocketIoHandler(SocketIoHandler):
             await self.executer_requete(sid, message, domain, action, exchange, stream=True)
             return False
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
-            request_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
-            if request_mapping.get('stream') is not True:
+            command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
+            if command_mapping.get('stream') is not True:
                 return self.etat.formatteur_message.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
-            exchange = request_mapping.get('exchange') or default_exchange
-            nowait = request_mapping.get('nowait')
+            exchange = command_mapping.get('exchange') or default_exchange
+            nowait = command_mapping.get('nowait')
             result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True)
             self.__logger.debug("!! execution command streaming : %s" % result)
             return False
