@@ -108,6 +108,12 @@ class MappedSocketIoHandler(SocketIoHandler):
         action = routage['action']
         domain = routage.get('domaine') or default_domain
 
+        # Special case - check if the exchange is being altered
+        try:
+            destination_exchange = message['attachements']['destination_exchange']
+        except KeyError:
+            destination_exchange = None
+
         kind = message['kind']
         if kind == Constantes.KIND_REQUETE:
             try:
@@ -119,6 +125,10 @@ class MappedSocketIoHandler(SocketIoHandler):
                     return {'ok': False, 'code': 403, 'err': 'Access denied, request %s/%s not allowed' % (domain, action)}
 
             exchange = request_mapping.get('exchange') or default_exchange
+            if destination_exchange is not None:
+                if destination_exchange in request_mapping.get('exchanges'):
+                    exchange = destination_exchange
+
             return await self.executer_requete(sid, message, domain, action, exchange)
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             try:
@@ -130,6 +140,10 @@ class MappedSocketIoHandler(SocketIoHandler):
                     return {'ok': False, 'code': 403, 'err': 'Access denied, command %s/%s not allowed' % (domain, action)}
 
             exchange = command_mapping.get('exchange') or default_exchange
+            if destination_exchange is not None:
+                if destination_exchange in command_mapping.get('exchanges'):
+                    exchange = destination_exchange
+
             nowait = command_mapping.get('nowait')
             return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
         else:
