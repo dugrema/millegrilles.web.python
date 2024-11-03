@@ -1,6 +1,6 @@
-FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2024.7.49
+FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2024.8.64
 
-ARG VBUILD=2024.7.0
+ARG VBUILD=2024.8.0
 
 ENV CERT_PEM=/run/secrets/cert.pem \
     KEY_PEM=/run/secrets/key.pem \
