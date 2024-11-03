@@ -103,7 +103,7 @@ async def feed_filepart2(etat_upload: EtatUploadParts, limit=BATCH_INTAKE_UPLOAD
 
 
 async def get_hebergement_jwt_readwrite(etat_web: EtatWeb):
-    consignation = await etat_web.get_consignation()
+    consignation = await etat_web.get_filehost()
     rafraichir = True
     expiration_courante = datetime.datetime.utcnow() - datetime.timedelta(minutes=2)
     if consignation.jwt_expiration is not None:
@@ -136,7 +136,7 @@ async def uploader_fichier_parts(session: aiohttp.ClientSession, etat_web: EtatW
                                  stop_event: Optional[asyncio.Event] = None) -> aiohttp.ClientResponse:
     ssl_context = etat_web.ssl_context
     # url_consignation = await asyncio.wait_for(etat_web.get_url_consignation(), timeout=5)
-    info_consignation = await asyncio.wait_for(etat_web.get_consignation(), timeout=5)
+    info_consignation = await asyncio.wait_for(etat_web.get_filehost(), timeout=5)
     url_consignation = info_consignation.url
     type_store = info_consignation.type_store
     if type_store == 'heberge':

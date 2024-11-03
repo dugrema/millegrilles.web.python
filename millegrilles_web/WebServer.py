@@ -10,7 +10,7 @@ from redis.asyncio.client import Redis as RedisClient
 
 from aiohttp import web
 from aiohttp.web_request import Request
-from asyncio import Event
+from asyncio import Event, TaskGroup
 from ssl import SSLContext
 from typing import Optional
 
@@ -161,17 +161,13 @@ class WebServer:
                 pass  # OK
 
     async def run(self):
-        tasks = [
-            self.__run_web_server(),
-            self.entretien(),
-        ]
-
-        if self._socket_io_handler is not None:
-            tasks.append(self._socket_io_handler.run())
-        else:
-            self.__logger.warning('socket.io non initialise')
-
-        await asyncio.gather(*tasks)
+        async with TaskGroup() as group:
+            group.create_task(self.__run_web_server())
+            group.create_task(self.entretien())
+            if self._socket_io_handler is not None:
+                group.create_task(self._socket_io_handler.run())
+            else:
+                self.__logger.warning('socket.io non initialise')
 
     async def __run_web_server(self):
         runner = web.AppRunner(self._app)

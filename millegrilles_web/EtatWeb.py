@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import datetime
 
 from typing import Optional
 
@@ -10,15 +9,36 @@ from millegrilles_messages.MilleGrillesConnecteur import EtatInstance
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
 
 
-class InformationConsignation:
+class InformationFilehost:
 
-    def __init__(self, url: str, type_store: str, instance_id: str):
+    def __init__(self, filehost: dict, url: str, filehost_id: str, instance_id: str):
+        self.__filehost = filehost
         self.url = url
-        self.type_store = type_store
         self.instance_id = instance_id
-        self.jwt_readonly: Optional[str] = None
-        self.jwt_readwrite: Optional[str] = None
-        self.jwt_expiration: Optional[datetime.datetime] = None
+        self.filehost_id = filehost_id
+
+    @staticmethod
+    def from_filehost(filehost: dict, local_instance_id: str):
+        filehost_id = filehost['filehost_id']
+        if filehost.get('instance_id') and filehost.get('url_internal'):
+            # Use local nginx passthrough. Localhost is placeholder for connection that client is using.
+            url = f'https://localhost/filehost/'
+        elif filehost.get('url_external') and filehost.get('tls_external') in ['nocheck', 'external']:
+            # Use external URL (internet)
+            url = f'{filehost.get('url_external')}/filehost/'
+        else:
+            raise Exception('Filehost not available externally')
+
+        info = InformationFilehost(filehost, url, filehost_id, local_instance_id)
+
+        return info
+
+    def to_dict(self):
+        return {
+            'url': self.url,
+            'filehost_id': self.filehost_id,
+            'instance_id': self.instance_id,
+        }
 
 
 class EtatWeb(EtatInstance):
@@ -30,7 +50,8 @@ class EtatWeb(EtatInstance):
         self.__ssl_context: Optional[SSLContext] = None
 
         # self.__url_consignation: Optional[str] = None
-        self.__consignation: Optional[InformationConsignation] = None
+        # self.__consignation: Optional[InformationFilehost] = None
+        self.__filehost: Optional[InformationFilehost] = None
         self.__event_consignation = asyncio.Event()
 
     async def reload_configuration(self):
@@ -63,25 +84,37 @@ class EtatWeb(EtatInstance):
                 pass  # OK
 
     async def charger_consignation(self):
-        producer = self.producer
-        if producer is None:
-            await asyncio.sleep(5)  # Attendre connexion MQ
+        producer = None
+        for i in range(0, 6):
             producer = self.producer
-            if producer is None:
-                raise Exception('producer pas pret')
-        await asyncio.wait_for(producer.producer_pret().wait(), 30)
+            if producer:
+                break
+            await asyncio.sleep(0.5)  # Attendre connexion MQ
+
+        if producer is None:
+            raise Exception('producer pas pret')
 
         reponse = await producer.executer_requete(
-            {}, 'CoreTopologie', 'getConsignationFichiers', exchange="1.public")
+            {}, 'CoreTopologie', 'getFilehostForInstance', exchange="1.public")
 
         try:
-            consignation_url = reponse.parsed['consignation_url']
-            type_store = reponse.parsed['type_store']
-            instance_id = reponse.parsed['instance_id']
+            filehost_reponse = reponse.parsed
+            if filehost_reponse['ok'] is not True:
+                raise Exception('information filehost non disponible')
+
+            filehost = filehost_reponse['filehost']
+            # url_internal = filehost_reponse.get('url_internal')
+            # url_exnternal = filehost_reponse.get('url_internal')
+            # tls_external = filehost_reponse.get('url_internal')
+            # filehost_instance_id = filehost_reponse.get('instance_id')
+
+            # consignation_url = reponse.parsed['consignation_url']
+            # type_store = reponse.parsed['type_store']
+            # instance_id = reponse.parsed['instance_id']
             # self.__url_consignation = consignation_url
-            self.__consignation = InformationConsignation(consignation_url, type_store, instance_id)
+            # self.__consignation = InformationFilehost(consignation_url, type_store, instance_id)
+            self.__filehost = InformationFilehost.from_filehost(filehost, self.instance_id)
             self.__event_consignation.set()
-            return consignation_url
         except Exception as e:
             self.__logger.exception("Erreur chargement URL consignation")
 
@@ -90,7 +123,7 @@ class EtatWeb(EtatInstance):
         # await self.__event_consignation.wait()
         # return self.__url_consignation
 
-    async def get_consignation(self) -> InformationConsignation:
+    async def get_filehost(self) -> InformationFilehost:
         await self.__event_consignation.wait()
-        return self.__consignation
+        return self.__filehost
 

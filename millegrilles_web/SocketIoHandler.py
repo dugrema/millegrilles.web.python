@@ -4,6 +4,8 @@ import datetime
 import json
 import logging
 import secrets
+from asyncio import TaskGroup
+
 import socketio
 
 from typing import Optional, Union
@@ -11,6 +13,7 @@ from typing import Optional, Union
 from certvalidator.errors import PathValidationError
 from cryptography.exceptions import InvalidSignature
 
+from millegrilles_messages.bus.BusContext import ForceTerminateExecution
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.EnveloppeCertificat import EnveloppeCertificat
 
@@ -58,6 +61,7 @@ class SocketIoHandler:
         self._sio.on('getCertificatsMaitredescles', handler=self.get_certificats_maitredescles)
         self._sio.on('getInfoIdmg', handler=self.get_info_idmg)
         self._sio.on('getEtatAuth', handler=self.get_info_idmg)
+        self._sio.on('getInfoFilehost', handler=self.get_info_filehost)
 
         # Options 2.prive - pour usager authentifie
         self._sio.on('upgrade', handler=self.upgrade)
@@ -67,10 +71,18 @@ class SocketIoHandler:
         self._sio.on('downgradePrive', handler=self.not_implemented_handler)
 
     async def run(self):
-        await asyncio.gather(
-            self.entretien_maitredescles(),
-            self.__subscription_handler.run(),
-        )
+        try:
+            async with TaskGroup() as group:
+                group.create_task(self.entretien_maitredescles())
+                group.create_task(self.__subscription_handler.run())
+                group.create_task(self.__stop_thread())
+        except* ForceTerminateExecution:
+            pass  # Ok
+
+    async def __stop_thread(self):
+        await self._stop_event.wait()
+        await self._sio.shutdown()
+        raise ForceTerminateExecution()
 
     async def entretien_maitredescles(self):
         while self._stop_event.is_set() is False:
@@ -322,6 +334,18 @@ class SocketIoHandler:
                     reponse['auth'] = False
 
             return reponse
+
+    async def get_info_filehost(self, sid: str, params: dict):
+        async with self._semaphore_requetes:
+            async with self._sio.session(sid) as session:
+                if session.get('auth_verifie'):
+                    filehost_info = await self.etat.get_filehost()
+                    reponse = {'ok': True, 'filehost': filehost_info.to_dict()}
+                else:
+                    reponse = {'ok': False, 'err': 'Not authenticated'}
+
+            reponse_signee, message_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+            return reponse_signee
 
     @property
     def exchange_default(self):

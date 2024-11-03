@@ -2,10 +2,12 @@ import argparse
 import asyncio
 import datetime
 import logging
+from asyncio import TaskGroup
 
 from typing import Optional
 
 from millegrilles_messages.MilleGrillesConnecteur import MilleGrillesConnecteur
+from millegrilles_messages.bus.BusContext import ForceTerminateExecution
 from millegrilles_messages.docker.Entretien import TacheEntretien
 
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
@@ -74,16 +76,13 @@ class WebAppMain:
 
     async def run(self):
 
-        threads = [
-            self._rabbitmq_dao.run(),
-            self.__etat.run(self._stop_event, self._rabbitmq_dao),
-            self._web_server.run(),
-        ]
-
-        if self.__intake_fichiers:
-            threads.append(self.__intake_fichiers.run())
-
-        await asyncio.gather(*threads)
+        try:
+            async with TaskGroup() as group:
+                group.create_task(self._rabbitmq_dao.run())
+                group.create_task(self.__etat.run(self._stop_event, self._rabbitmq_dao))
+                group.create_task(self._web_server.run())
+        except* ForceTerminateExecution:
+            pass
 
         logger.info("run() stopping")
 
