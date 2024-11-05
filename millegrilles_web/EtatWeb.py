@@ -4,8 +4,7 @@ import logging
 from typing import Optional
 
 from ssl import SSLContext
-
-from future.backports.urllib.parse import urljoin
+from urllib.parse import urljoin
 
 from millegrilles_messages.MilleGrillesConnecteur import EtatInstance
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
