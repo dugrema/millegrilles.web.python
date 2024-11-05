@@ -5,6 +5,8 @@ from typing import Optional
 
 from ssl import SSLContext
 
+from future.backports.urllib.parse import urljoin
+
 from millegrilles_messages.MilleGrillesConnecteur import EtatInstance
 from millegrilles_web.Configuration import ConfigurationApplicationWeb
 
@@ -25,7 +27,7 @@ class InformationFilehost:
             url = f'https://localhost/filehost/'
         elif filehost.get('url_external') and filehost.get('tls_external') in ['nocheck', 'external']:
             # Use external URL (internet)
-            url = f'{filehost.get('url_external')}/filehost/'
+            url = urljoin(filehost['url_external'], '/filehost/')
         else:
             raise Exception('Filehost not available externally')
 
