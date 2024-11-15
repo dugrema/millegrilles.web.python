@@ -21,12 +21,12 @@ class InformationFilehost:
     @staticmethod
     def from_filehost(filehost: dict, local_instance_id: str):
         filehost_id = filehost['filehost_id']
-        if filehost.get('instance_id') and filehost.get('url_internal'):
-            # Use local nginx passthrough. Localhost is placeholder for connection that client is using.
-            url = f'https://localhost/filehost/'
-        elif filehost.get('url_external') and filehost.get('tls_external') in ['nocheck', 'external']:
+        if filehost.get('url_external') and filehost.get('tls_external') in ['nocheck', 'external']:
             # Use external URL (internet)
             url = urljoin(filehost['url_external'], '/filehost/')
+        elif filehost.get('instance_id') and filehost.get('url_internal'):
+            # Use local nginx passthrough. Localhost is placeholder for connection that client is using.
+            url = f'https://localhost/filehost/'
         else:
             raise Exception('Filehost not available externally')
 
