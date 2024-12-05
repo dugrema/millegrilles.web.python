@@ -58,7 +58,8 @@ class MgbusHandler:
         channel_exclusive = create_exclusive_q_channel(context, self.__on_exclusive_message)
         await self.__manager.context.bus_connector.add_channel(channel_exclusive)
 
-        subscriptions_channel, subscriptions_queue = create_subcriptsion_q_channel(context, self.__on_subscription_message)
+        subscriptions_channel, subscriptions_queue = create_subscription_q_channel(context, self.__on_subscription_message)
+        await self.__manager.context.bus_connector.add_channel(subscriptions_channel)
         self.__subscriptions_channel = subscriptions_channel
         self.__subscriptions_queue = subscriptions_queue
 
@@ -116,13 +117,15 @@ def create_exclusive_q_channel(context: MilleGrillesBusContext,
     return q_channel
 
 
-def create_subcriptsion_q_channel(
+def create_subscription_q_channel(
         context: MilleGrillesBusContext, on_message: Callable[[MessageWrapper], Coroutine[Any, Any, None]]) -> (MilleGrillesPikaChannel, MilleGrillesPikaQueueConsumer):
 
     q_channel = MilleGrillesPikaChannel(context, prefetch_count=20)
-    q_instance = MilleGrillesPikaQueueConsumer(context, on_message, None, exclusive=True, arguments={'x-message-ttl': 20_000})
+    q_instance = MilleGrillesPikaQueueConsumer(context, on_message, None, exclusive=True, arguments={'x-message-ttl': 30_000})
 
     # Note : routing keys are dynamically added/removed
+    q_instance.add_routing_key(
+        RoutingKey(Constantes.SECURITE_PUBLIC, f'evenement.{Constantes.DOMAINE_CORE_TOPOLOGIE}.DUMMY'))
 
     q_channel.add_queue(q_instance)
     return q_channel, q_instance

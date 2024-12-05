@@ -5,7 +5,7 @@ import socketio
 
 from typing import Optional, Union
 
-from millegrilles_messages.MilleGrillesConnecteur import RoutingKey
+from millegrilles_messages.bus.PikaQueue import RoutingKey
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
 from millegrilles_messages.messages.MessagesThread import MessagesThread, RessourcesConsommation
 from millegrilles_web.WebAppManager import WebAppManager
@@ -204,17 +204,12 @@ class SocketIoSubscriptions:
     async def ajouter_rk(self, routing_key: str, exchange: str):
         """ Ajouter une routing_key sur la Q du consumer dans MQ """
         subscription_queue = self.__manager.get_subcription_queue()
-        subscription_queue.add_routing_key(RoutingKey(routing_key, exchange))
+        await subscription_queue.add_bind_routing_key(RoutingKey(exchange, routing_key))
 
     async def retirer_rk(self, routing_key: str, exchange: str):
         """ Retirer une routing_key de la Q du consumer dans MQ """
-        messages_module = self.__messages_thread.messages_module
-        consumers = messages_module.get_consumers()
-
-        for consumer in consumers:
-            if consumer.q == self.ressources_consommation.q:
-                self.__logger.debug("Queue %s : Retirer rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
-                consumer.retirer_routing_key(exchange, routing_key)
+        subscription_queue = self.__manager.get_subcription_queue()
+        await subscription_queue.remove_unbind_routing_key(RoutingKey(exchange, routing_key))
 
     async def add_sid_room(self, sid: str, room: str):
         self.__logger.debug("Ajout sid %s a room %s" % (sid, room))

@@ -236,8 +236,7 @@ class SocketIoHandler:
                     user_id = None
 
             try:
-                raise NotImplementedError('todo')
-                # return await self._subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
+                return await self._subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
             except Exception:
                 self.__logger.exception("subscribe Erreur subscribe")
                 return {'ok': False}
