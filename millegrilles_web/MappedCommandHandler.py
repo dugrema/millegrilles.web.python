@@ -13,7 +13,7 @@ class MappedCommandHandler(CommandHandler):
 
         # Queue dynamique selon subscriptions (rooms) dans socketio
         res_subscriptions = RessourcesConsommation(
-            self.socket_io_handler.subscription_handler.callback_reply_q,
+            self.socket_io_handler.subscription_handler.handle_subscription_message,
             channel_separe=True, est_asyncio=True)
         self.socket_io_handler.subscription_handler.messages_thread = messages_thread
         self.socket_io_handler.subscription_handler.ressources_consommation = res_subscriptions

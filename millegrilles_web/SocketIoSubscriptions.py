@@ -1,11 +1,14 @@
 import asyncio
 import logging
 import json
+import socketio
 
 from typing import Optional, Union
 
+from millegrilles_messages.MilleGrillesConnecteur import RoutingKey
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
 from millegrilles_messages.messages.MessagesThread import MessagesThread, RessourcesConsommation
+from millegrilles_web.WebAppManager import WebAppManager
 
 
 class SocketIoSubscriptions:
@@ -13,15 +16,14 @@ class SocketIoSubscriptions:
     Gere les subscriptions a des "chat rooms" pour recevoir des evenements MQ via Socket.IO
     """
 
-    def __init__(self, sio_handler, stop_event: asyncio.Event):
+    def __init__(self, manager: WebAppManager):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
-        self.__sio_handler = sio_handler
-        self.__stop_event = stop_event
+        self.__manager = manager
         self.__messages_thread: Optional[MessagesThread] = None
         self.__ressources_consommation: Optional[RessourcesConsommation] = None
-
         self.__rooms = dict()  # { [room_handle]: {exchange, routing_key} }
         self.__semaphore_rooms = asyncio.BoundedSemaphore(value=1)
+        self.__sio: Optional[socketio.AsyncServer] = None
 
     @property
     def messages_thread(self) -> Optional[MessagesThread]:
@@ -39,8 +41,13 @@ class SocketIoSubscriptions:
     def ressources_consommation(self, r):
         self.__ressources_consommation = r
 
-    async def setup(self):
-        pass
+    @property
+    def sio(self) -> socketio.AsyncServer:
+        return self.__sio
+
+    @sio.setter
+    def sio(self, value: socketio.AsyncServer):
+        self.__sio = value
 
     async def run(self):
         self.__logger.info("run Debut")
@@ -50,15 +57,7 @@ class SocketIoSubscriptions:
         self.__logger.info("run Fin")
 
     async def entretien_rooms(self):
-        while self.__stop_event.is_set() is False:
-
-            # rooms = self.__sio_handler.rooms
-            # namespace_root = rooms.get('/')
-            #
-            # if namespace_root is None:
-            #     self.__logger.debug("entretien_rooms namespace root (/) est None")
-            # else:
-            #     self.__logger.debug("entretien_rooms namespace root : %s" % namespace_root)
+        while self.__manager.context.stopping is False:
 
             # Faire entretien des rooms
             async with self.__semaphore_rooms:
@@ -66,7 +65,7 @@ class SocketIoSubscriptions:
                     # if namespace_root is None or namespace_root.get(room_handle) is None:
                     participants = 0
                     try:
-                        participants_list = self.__sio_handler.get_participants(room_handle)
+                        participants_list = self.get_participants(room_handle)
                         for p in participants_list:
                             participants = participants + 1
                     except TypeError:
@@ -77,10 +76,7 @@ class SocketIoSubscriptions:
                         await self.retirer_rk(**value)
                         del self.__rooms[room_handle]
 
-            try:
-                await asyncio.wait_for(self.__stop_event.wait(), timeout=20)
-            except asyncio.TimeoutError:
-                pass  # OK
+            await self.__manager.context.wait(20)
 
     async def disconnect(self, sid: str):
         pass
@@ -136,9 +132,9 @@ class SocketIoSubscriptions:
     async def ajouter_sid_a_room(self, sid: str, exchange: str, routing_key: str):
         room_handle = get_room_handle(exchange, routing_key)
         await self.ajouter_rk(routing_key, exchange)
-        await self.__sio_handler.ajouter_sid_room(sid, room_handle)
+        await self.add_sid_room(sid, room_handle)
 
-        self.__logger.debug("ajouter_sid_a_room Rooms : %s" % self.__sio_handler.rooms)
+        self.__logger.debug("ajouter_sid_a_room Rooms : %s" % self.rooms)
 
         # Conserver une reference pour cleanup de la routing key dans MQ si la room est fermee
         async with self.__semaphore_rooms:
@@ -146,12 +142,12 @@ class SocketIoSubscriptions:
 
     async def retirer_sid_de_room(self, sid: str, exchange: str, routing_key: str):
         room_handle = get_room_handle(exchange, routing_key)
-        await self.__sio_handler.retirer_sid_room(sid, room_handle)
+        await self.remove_sid_room(sid, room_handle)
 
-        self.__logger.debug("retirer_sid_de_room Rooms : %s" % self.__sio_handler.rooms)
+        self.__logger.debug("retirer_sid_de_room Rooms : %s", self.rooms)
 
-    async def callback_reply_q(self, message: MessageWrapper, module_messages: MessagesThread):
-        self.__logger.debug("callback_reply_q RabbitMQ nessage recu : %s" % message)
+    async def handle_subscription_message(self, message: MessageWrapper):
+        self.__logger.debug("handle_subscription_message Mgbus subscriptions message received : %s", message)
 
         type_evenement, domaine, partition, action = get_key_parts(message.routing_key)
         try:
@@ -203,17 +199,12 @@ class SocketIoSubscriptions:
                 nom_evenement_room = nom_evenement_all_domaines
             else:
                 nom_evenement_room = nom_evenement
-            await self.__sio_handler.emettre_message_room(nom_evenement_room, message_room, nom_room)
+            await self.emit_message_room(nom_evenement_room, message_room, nom_room)
 
     async def ajouter_rk(self, routing_key: str, exchange: str):
         """ Ajouter une routing_key sur la Q du consumer dans MQ """
-        messages_module = self.__messages_thread.messages_module
-        consumers = messages_module.get_consumers()
-
-        for consumer in consumers:
-            if consumer.q == self.ressources_consommation.q:
-                self.__logger.debug("Queue %s : Ajouter rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
-                consumer.ajouter_routing_key(exchange, routing_key)
+        subscription_queue = self.__manager.get_subcription_queue()
+        subscription_queue.add_routing_key(RoutingKey(routing_key, exchange))
 
     async def retirer_rk(self, routing_key: str, exchange: str):
         """ Retirer une routing_key de la Q du consumer dans MQ """
@@ -224,6 +215,37 @@ class SocketIoSubscriptions:
             if consumer.q == self.ressources_consommation.q:
                 self.__logger.debug("Queue %s : Retirer rks %s sur exchanges %s" % (consumer.q, routing_key, exchange))
                 consumer.retirer_routing_key(exchange, routing_key)
+
+    async def add_sid_room(self, sid: str, room: str):
+        self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
+        return await self.__sio.enter_room(sid, room)
+
+    async def remove_sid_room(self, sid: str, room: str):
+        self.__logger.debug("Retrait sid %s de room %s" % (sid, room))
+        return await self.__sio.leave_room(sid, room)
+
+    async def emit_message_room(self, event: str, data: dict, room: str):
+        return await self.__sio.emit(event, data, room=room)
+
+    @property
+    def rooms(self):
+        # return self._sio.manager.rooms
+        return self.__sio.manager.rooms
+
+    def get_participants(self, room: str):
+        return self.__sio.manager.get_participants('/', room)
+
+    async def evict_usager(self, message: MessageWrapper):
+        user_id = message.parsed['userId']
+        self.__logger.info("evict_usager Evist user %s", user_id)
+
+        # Find SIDs associated to the user_id
+        for (sid, _) in self.get_participants('user.%s' % user_id):
+            self.__logger.debug("evict_usager %s SID:%s", user_id, sid)
+            async with self.__sio.session(sid) as session:
+                session.clear()
+
+            await self.__sio.disconnect(sid)
 
 
 def get_key_parts(routing_key: str):

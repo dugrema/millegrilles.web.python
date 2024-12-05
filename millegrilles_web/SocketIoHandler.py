@@ -4,36 +4,31 @@ import datetime
 import json
 import logging
 import secrets
-from asyncio import TaskGroup
-
 import socketio
 
+from aiohttp import web
+from asyncio import TaskGroup
 from typing import Optional, Union
-
 from certvalidator.errors import PathValidationError
 from cryptography.exceptions import InvalidSignature
 
 from millegrilles_messages.bus.BusContext import ForceTerminateExecution
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.EnveloppeCertificat import EnveloppeCertificat
-
-from millegrilles_web.EtatWeb import EtatWeb
 from millegrilles_web import Constantes as ConstantesWeb
-from millegrilles_messages.messages.MessagesModule import MessageWrapper
 from millegrilles_web.SocketIoSubscriptions import SocketIoSubscriptions
+from millegrilles_web.WebAppManager import WebAppManager
 
 
 class SocketIoHandler:
 
-    def __init__(self, server, stop_event: asyncio.Event, always_connect=False):
+    def __init__(self, manager: WebAppManager, subscription_handler: SocketIoSubscriptions, always_connect=False):
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
-        self._server = server
-        self._stop_event = stop_event
+        self._manager: WebAppManager = manager
+        self._subscription_handler = subscription_handler
+
         self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect, cors_allowed_origins='*')
-
-        self.__subscription_handler = SocketIoSubscriptions(self, self._stop_event)
-
-        self.__certificats_maitredescles = dict()
+        self._certificats_maitredescles = dict()
 
         self._semaphore_requetes = asyncio.BoundedSemaphore(value=10)
         self._semaphore_commandes = asyncio.BoundedSemaphore(value=5)
@@ -41,16 +36,16 @@ class SocketIoHandler:
         self._semaphore_auth = asyncio.BoundedSemaphore(value=3)
 
     @property
-    def etat(self) -> EtatWeb:
-        return self._server.etat
+    def sio(self) -> socketio.AsyncServer:
+        return self._sio
 
-    @property
-    def subscription_handler(self) -> SocketIoSubscriptions:
-        return self.__subscription_handler
+    async def setup(self, web_app: web.Application):
+        # Wire socketio server in subscriptions handler
+        self._subscription_handler.sio = self._sio
 
-    async def setup(self):
-        socketio_path = f'{self._server.get_nom_app()}/socket.io'
-        self._sio.attach(self._server.app, socketio_path=socketio_path)
+        application_path = self._manager.application_path
+        socketio_path = f'{application_path[1:]}/socket.io'
+        self._sio.attach(web_app, socketio_path=socketio_path)
         await self._preparer_socketio_events()
 
     async def _preparer_socketio_events(self):
@@ -73,84 +68,47 @@ class SocketIoHandler:
     async def run(self):
         try:
             async with TaskGroup() as group:
-                group.create_task(self.entretien_maitredescles())
-                group.create_task(self.__subscription_handler.run())
+                group.create_task(self.__initial_keymaster_load())
                 group.create_task(self.__stop_thread())
         except* ForceTerminateExecution:
             pass  # Ok
 
     async def __stop_thread(self):
-        await self._stop_event.wait()
+        await self._manager.context.wait()
         await self._sio.shutdown()
         raise ForceTerminateExecution()
 
-    async def entretien_maitredescles(self):
-        while self._stop_event.is_set() is False:
+    async def __initial_keymaster_load(self):
+        while self._manager.context.stopping is False:
 
             # Charger le certificat de maitre des cles
-            if len(self.__certificats_maitredescles) == 0:
+            if len(self._certificats_maitredescles) == 0:
                 self.__logger.debug("Tenter de charger au moins un certificat de maitre des cles")
                 try:
                     await self.charger_maitredescles()
+                    return  # Done
                 except Exception:
                     self.__logger.exception('Erreur chargement certificat de maitre des cles')
-            else:
-                # Retirer les certificats expires
-                expiration = datetime.datetime.utcnow() - datetime.timedelta(minutes=30)
-                fingerprints_expires = list()
-                for key, value in self.__certificats_maitredescles.items():
-                    if value['date_reception'] < expiration:
-                        fingerprints_expires.append(key)
-                for fp in fingerprints_expires:
-                    del self.__certificats_maitredescles[fp]
 
-            try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                pass  # OK
+            await self._manager.context.wait(15)
 
     async def charger_maitredescles(self):
         try:
-            producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=10)
+            producer = await self._manager.context.get_producer()
         except asyncio.TimeoutError:
-            # MQ non disponible, abort
+            # MQ not available, abort
             return
 
-        requete = dict()
-        action = 'certMaitreDesCles'
-        domaine = Constantes.DOMAINE_MAITRE_DES_CLES
-        reponse = await producer.executer_requete(requete, domaine=domaine, action=action,
-                                                  exchange=Constantes.SECURITE_PUBLIC)
-        await self.recevoir_certificat_maitredescles(reponse)
-
-    async def recevoir_certificat_maitredescles(self, message: MessageWrapper):
-        certificat = message.certificat
-        if Constantes.ROLE_MAITRE_DES_CLES in certificat.get_roles:
-            fingerprint = certificat.fingerprint
-            pem = certificat.chaine_pem()
-            self.__certificats_maitredescles[fingerprint] = {
-                'pem': pem,
-                'date_reception': datetime.datetime.utcnow(),
-            }
-
-    async def evict_usager(self, message: MessageWrapper):
-        user_id = message.parsed['userId']
-        self.__logger.info("evict_usager Expulser usager %s" % user_id)
-
-        # Trouver les sids associes au user_id
-        for (sid, _) in self.get_participants('user.%s' % user_id):
-            self.__logger.debug("evict_usager %s SID:%s" % (user_id, sid))
-            async with self._sio.session(sid) as session:
-                session.clear()
-
-            await self._sio.disconnect(sid)
+        response = await producer.request(
+            dict(), domain=Constantes.DOMAINE_MAITRE_DES_CLES, action='certMaitreDesCles', exchange=Constantes.SECURITE_PUBLIC)
+        await self._manager.update_keymaster_certificate(response)
 
     async def authentifier_message(self, session: dict, message: dict,
                                    enveloppe: Optional[EnveloppeCertificat] = None) -> EnveloppeCertificat:
 
         if enveloppe is None:
             # Valider le message avant de le transmettre
-            enveloppe = await self.etat.validateur_message.verifier(message)
+            enveloppe = await self._manager.context.validateur_message.verifier(message)
         else:
             pass  # OK, assumer que le message a deja ete valide
 
@@ -195,7 +153,7 @@ class SocketIoHandler:
     async def disconnect(self, sid: str):
         self.__logger.debug("disconnect %s", sid)
         async with self._semaphore_auth:
-            await self.subscription_handler.disconnect(sid)
+            await self._subscription_handler.disconnect(sid)
 
     async def not_implemented_handler(self, sid: str, environ: dict):
         raise NotImplementedError('not implemented')
@@ -206,10 +164,10 @@ class SocketIoHandler:
 
             # Valider message (params)
             try:
-                enveloppe = await self.etat.validateur_message.verifier(message, verifier_certificat=True)
+                enveloppe = await self._manager.context.validateur_message.verifier(message, verifier_certificat=True)
             except (PathValidationError, InvalidSignature):
                 self.__logger.warning("upgrade Erreur certificat ou signature pour SID %s" % sid)
-                return self.etat.formatteur_message.signer_message(
+                return self._manager.context.formatteur.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Certificat ou signature message invalides'})[0]
             nom_usager = enveloppe.subject_common_name
             user_id = enveloppe.get_user_id
@@ -219,13 +177,13 @@ class SocketIoHandler:
 
             if not user_id or not nom_usager or Constantes.ROLE_USAGER not in enveloppe.get_roles:
                 self.__logger.warning("upgrade Le certificat utilise (%s) n'a pas de nom_usager/user_id - REFUSE" % enveloppe.subject_common_name)
-                return self.etat.formatteur_message.signer_message(
+                return self._manager.context.formatteur.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': "Le certificat utilise n'a pas de nomUsager/userId"})[0]
 
             # Comparer contenu a l'information dans la session
             async with self._sio.session(sid) as session:
                 if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
-                    return self.etat.formatteur_message.signer_message(
+                    return self._manager.context.formatteur.signer_message(
                         Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
 
                 user_name_session = session.get(ConstantesWeb.SESSION_USER_NAME)
@@ -234,12 +192,12 @@ class SocketIoHandler:
 
                 if user_name_session is None or user_id_session is None or challenge is None:
                     self.__logger.warning("upgrade Session ou challenge non initialise pour SID %s - REFUSE" % sid)
-                    return self.etat.formatteur_message.signer_message(
+                    return self._manager.context.formatteur.signer_message(
                         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
 
                 if user_name_session != nom_usager or user_id_session != user_id:
                     self.__logger.warning("upgrade Mismatch userid/username entre session et certificat pour SID %s - REFUSE" % sid)
-                    return self.etat.formatteur_message.signer_message(
+                    return self._manager.context.formatteur.signer_message(
                         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Mismatch userid/username entre session et certificat'})[0]
 
                 if challenge['data'] == contenu['data'] and challenge['date'] == contenu['date']:
@@ -247,14 +205,14 @@ class SocketIoHandler:
                     session[ConstantesWeb.SESSION_CHALLENGE_CERTIFICAT] = None
                 else:
                     self.__logger.warning("upgrade Mismatch date ou challenge pour SID %s - REFUSE" % sid)
-                    return self.etat.formatteur_message.signer_message(
+                    return self._manager.context.formatteur.signer_message(
                         Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session ou challenge non initialise'})[0]
 
                 session[ConstantesWeb.SESSION_AUTH_VERIFIE] = True
 
             self.__logger.debug("upgrade Authentification reussie, upgrade events")
 
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE, {'ok': True, 'protege': True, 'userName': user_name_session})[0]
 
     async def subscribe(self, sid: str, message: dict, routing_keys: Union[str, list[str]],
@@ -263,7 +221,7 @@ class SocketIoHandler:
             if session_requise is True:
                 async with self._sio.session(sid) as session:
                     if session.get(ConstantesWeb.SESSION_REQUEST_AUTH) != '1':
-                        return self.etat.formatteur_message.signer_message(
+                        return self._manager.context.formatteur.signer_message(
                             Constantes.KIND_REPONSE, {'ok': False, 'err': "Session non autorisee via param request X-Auth"})[0]
 
             if user_id is None:
@@ -273,12 +231,13 @@ class SocketIoHandler:
                             enveloppe = await self.authentifier_message(session, message, enveloppe)
                             user_id = enveloppe.get_user_id
                         except ErreurAuthentificationMessage as e:
-                            return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
+                            return self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
                 else:
                     user_id = None
 
             try:
-                return await self.__subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
+                raise NotImplementedError('todo')
+                # return await self._subscription_handler.subscribe(sid, user_id, routing_keys, exchanges)
             except Exception:
                 self.__logger.exception("subscribe Erreur subscribe")
                 return {'ok': False}
@@ -296,7 +255,8 @@ class SocketIoHandler:
                 user_id = None
 
             try:
-                return await self.__subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
+                raise NotImplementedError('todo')
+                # return await self._subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
             except Exception:
                 self.__logger.exception("subscribe Erreur unsubscribe")
                 return {'ok': False}
@@ -305,7 +265,7 @@ class SocketIoHandler:
         async with self._semaphore_requetes:
             challenge_secret = base64.b64encode(secrets.token_bytes(32)).decode('utf-8').replace('=', '')
             challenge = {
-                'date': int(datetime.datetime.utcnow().timestamp()),
+                'date': int(datetime.datetime.now().timestamp()),
                 'data': challenge_secret
             }
             async with self._sio.session(sid) as session:
@@ -314,12 +274,12 @@ class SocketIoHandler:
 
     async def get_certificats_maitredescles(self, sid: str):
         async with self._semaphore_requetes:
-            pems = [p['pem'] for p in self.__certificats_maitredescles.values()]
+            pems = [p['pem'] for p in self._certificats_maitredescles.values()]
             return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
         async with self._semaphore_requetes:
-            idmg = self.etat.clecertificat.enveloppe.idmg
+            idmg = self._manager.context.signing_key.enveloppe.idmg
 
             reponse = {
                 'idmg': idmg,
@@ -339,23 +299,19 @@ class SocketIoHandler:
         async with self._semaphore_requetes:
             async with self._sio.session(sid) as session:
                 if session.get('auth_verifie'):
-                    filehost_info = await self.etat.get_filehost()
+                    filehost_info = self._manager.context.filehost
                     reponse = {'ok': True, 'filehost': filehost_info.to_dict()}
                 else:
                     reponse = {'ok': False, 'err': 'Not authenticated'}
 
-            reponse_signee, message_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+            reponse_signee, message_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, reponse)
             return reponse_signee
-
-    @property
-    def exchange_default(self):
-        return self.etat.configuration.exchange_default
 
     async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, stream=False):
         async with self._semaphore_requetes:
             if stream is True:
                 if producer is None:
-                    producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+                    producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
 
                 # Enregistrer une correlation streaming
                 correlation_id = requete['id']
@@ -365,10 +321,11 @@ class SocketIoHandler:
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
                 self.__logger.info("Stream to correlation_id %s", correlation_id)
-                await producer.ajouter_correlation_callback(correlation_id, callback)
+                raise NotImplementedError('todo')
+                # await producer.ajouter_correlation_callback(correlation_id, callback)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe, nowait=True)
+                # return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe, nowait=True)
             else:
                 return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
 
@@ -376,7 +333,7 @@ class SocketIoHandler:
         async with self._semaphore_commandes:
             if stream is True:
                 if producer is None:
-                    producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+                    producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
 
                 # Enregistrer une correlation streaming
                 correlation_id = commande['id']
@@ -385,39 +342,25 @@ class SocketIoHandler:
                     message_parsed = message.original
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
-                await producer.ajouter_correlation_callback(correlation_id, callback)
+                raise NotImplementedError('todo')
+                # await producer.ajouter_correlation_callback(correlation_id, callback)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=True)
+                #return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=True)
             else:
                 return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=nowait)
 
-    async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str, exchange: Optional[str] = None,
-                                 producer=None, enveloppe=None, nowait=False):
-        """
-
-        :param type_message:
-        :param sid:
-        :param message:
-        :param domaine: Domaine du message - utilise pour verifier le routage
-        :param action: Action du message - utilise pour verifier le routage
-        :param exchange:
-        :param producer:
-        :param enveloppe:
-        :return:
-        """
-
+    async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str,
+                                 exchange: str, producer=None, enveloppe=None, nowait=False):
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
+                # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur.
             except ErreurAuthentificationMessage as e:
-                return self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
-
-        if exchange is None:
-            exchange = self.exchange_default
+                return self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, {'ok': False, 'err': str(e)})[0]
 
         if producer is None:
-            producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+            producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
 
         routage = message['routage']
         action = routage['action']
@@ -425,50 +368,43 @@ class SocketIoHandler:
         partition = routage.get('partition')
 
         if action != action_verif or domaine != domaine_verif:
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE,
                 {'ok': False, 'err': 'Routage mismatch domaine: %s, action: %s (doit etre domaine %s action %s)' % (domaine, action, domaine_verif, action_verif)}
             )[0]
 
         if type_message == 'requete':
-            reponse = await producer.executer_requete(message, domaine=domaine, action=action, partition=partition,
-                                                      exchange=exchange, noformat=True)
+            reponse = await producer.request(
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True)
         elif type_message == 'commande':
-            reponse = await producer.executer_commande(message, domaine=domaine, action=action, partition=partition,
-                                                       exchange=exchange, noformat=True, nowait=nowait)
+            reponse = await producer.command(
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True, nowait=nowait)
         else:
             raise ValueError('Type de message non supporte : %s' % type_message)
-        # Note - le certificat et la signature du message ont ete verifies. L'autorisation est laissee a l'appeleur
 
         try:
-            # parsed = reponse.parsed
-            # return parsed['__original']
             return reponse.original
         except AttributeError:
             return None
 
-    async def ajouter_sid_room(self, sid: str, room: str):
-        self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
-        return await self._sio.enter_room(sid, room)
-
-    async def retirer_sid_room(self, sid: str, room: str):
-        self.__logger.debug("Retrait sid %s de room %s" % (sid, room))
-        return await self._sio.leave_room(sid, room)
-
-    async def emettre_message_room(self, event: str, data: dict, room: str):
-        return await self._sio.emit(event, data, room=room)
-
-    @property
-    def rooms(self):
-        # return self._sio.manager.rooms
-        return self._sio.manager.rooms
-
-    def get_participants(self, room: str):
-        return self._sio.manager.get_participants('/', room)
-
-    # async def traiter_message_userid(self, message: MessageWrapper) -> Union[bool, dict]:
-    #     self.__logger.warning("traiter_message_userid Message user sans handler, DROPPED %s", message.routage)
-    #     return False
+    # async def ajouter_sid_room(self, sid: str, room: str):
+    #     self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
+    #     return await self._sio.enter_room(sid, room)
+    #
+    # async def retirer_sid_room(self, sid: str, room: str):
+    #     self.__logger.debug("Retrait sid %s de room %s" % (sid, room))
+    #     return await self._sio.leave_room(sid, room)
+    #
+    # async def emettre_message_room(self, event: str, data: dict, room: str):
+    #     return await self._sio.emit(event, data, room=room)
+    #
+    # @property
+    # def rooms(self):
+    #     # return self._sio.manager.rooms
+    #     return self._sio.manager.rooms
+    #
+    # def get_participants(self, room: str):
+    #     return self._sio.manager.get_participants('/', room)
 
 
 class ErreurAuthentificationMessage(Exception):

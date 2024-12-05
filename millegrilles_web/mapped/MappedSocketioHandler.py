@@ -7,6 +7,8 @@ from millegrilles_messages.messages.EnveloppeCertificat import EnveloppeCertific
 from millegrilles_messages.messages.Hachage import hacher
 from millegrilles_messages.certificats.Generes import EnveloppeCsr
 from millegrilles_web.SocketIoHandler import SocketIoHandler
+from millegrilles_web.SocketIoSubscriptions import SocketIoSubscriptions
+from millegrilles_web.mapped.MappedWebAppManager import MappedWebAppManager
 
 REQUESTS_DICT = 'requests_dict'
 COMMANDS_DICT = 'commands_dict'
@@ -16,10 +18,9 @@ AUTHORIZED_WEBAPI_IDMG = ['zeYncRqEqZ6eTEmUZ8whJFuHG796eSvCTWE4M432izXrp22bAtwGm
 
 class MappedSocketIoHandler(SocketIoHandler):
 
-    def __init__(self, app, stop_event: asyncio.Event):
+    def __init__(self, manager: MappedWebAppManager, subscription_handler: SocketIoSubscriptions, always_connect=False):
+        super().__init__(manager, subscription_handler, always_connect)
         self.__logger = logging.getLogger(__name__ + '.' + self.__class__.__name__)
-        super().__init__(app, stop_event)
-        self.__exchange_default = app.etat.configuration.exchange_default
 
         # Mapping files for all connected sessions. Indexed by SID.
         self.__mapping_files: dict[str, dict] = {}
@@ -54,7 +55,7 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         if mapping.get('sig'):
             # Verify signed api mapping file
-            cert = await self.etat.validateur_message.verifier(mapping, utiliser_date_message=True, utiliser_idmg_message=True)
+            cert = await self._manager.context.validateur_message.verifier(mapping, utiliser_date_message=True, utiliser_idmg_message=True)
             roles = cert.get_roles
             if 'webapi' not in roles or 'signature' not in roles:
                 raise Exception('The api mapping signature is invalid')
@@ -66,7 +67,7 @@ class MappedSocketIoHandler(SocketIoHandler):
 
             api_map = json.loads(mapping['contenu'])
         else:
-            if not self.etat.configuration.dev_mode:
+            if not self._manager.context.configuration.dev_mode:
                 raise Exception('The api mapping is not signed')
             # Dev mode - accept unsigned mapping files
             api_map = mapping
@@ -97,7 +98,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         try:
             mapping = self.__mapping_files[sid]
         except KeyError:
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
 
         defaults = mapping['defaults']
@@ -153,7 +154,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         try:
             mapping = self.__mapping_files[sid]
         except KeyError:
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
 
         defaults = mapping['defaults']
@@ -168,7 +169,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         if kind == Constantes.KIND_REQUETE:
             request_mapping = mapping[REQUESTS_DICT]['/'.join((domain, action))]
             if request_mapping.get('stream') is not True:
-                return self.etat.formatteur_message.signer_message(
+                return self._manager.context.formatteur.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = request_mapping.get('exchange') or default_exchange
             await self.executer_requete(sid, message, domain, action, exchange, stream=True)
@@ -176,7 +177,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
             if command_mapping.get('stream') is not True:
-                return self.etat.formatteur_message.signer_message(
+                return self._manager.context.formatteur.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = command_mapping.get('exchange') or default_exchange
             nowait = command_mapping.get('nowait')
@@ -198,7 +199,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         routing_keys = [f'evenement.CoreMaitreDesComptes.{public_key}.activationFingerprintPk']
         # Note : message non authentifie (sans signature). Flag enveloppe=False empeche validation.
         reponse = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=False, session_requise=False)
-        reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+        reponse_signee, correlation_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, reponse)
         return reponse_signee
 
     async def unsubscribe_activation(self, sid: str, request: dict):
@@ -207,32 +208,32 @@ class MappedSocketIoHandler(SocketIoHandler):
         public_key = request['publicKey']
         routing_keys = [f'evenement.CoreMaitreDesComptes.{public_key}.activationFingerprintPk']
         reponse = await self.unsubscribe(sid, request, routing_keys, exchanges, session_requise=False)
-        reponse_signee, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+        reponse_signee, correlation_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, reponse)
         return reponse_signee
 
     async def handle_subscribe(self, sid: str, request: dict):
         routing_keys, exchanges, enveloppe = await self.map_subscription(sid, request)
         response = await self.subscribe(sid, request, routing_keys, exchanges, enveloppe=enveloppe)
-        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
+        signed_response, correlation_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, response)
         return signed_response
 
     async def handle_unsubscribe(self, sid: str, request: dict):
         routing_keys, exchanges, _enveloppe = await self.map_subscription(sid, request)
         response = await self.unsubscribe(sid, request, routing_keys, exchanges)
-        signed_response, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, response)
+        signed_response, correlation_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, response)
         return signed_response
 
     async def map_subscription(self, sid: str, request: dict) -> (list[str], list[str], EnveloppeCertificat):
         try:
             mapping = self.__mapping_files[sid]
         except KeyError:
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
 
         event_name = request['routage']['action']
         event_mapping = mapping['subscriptions'][event_name]
 
-        enveloppe = await self.etat.validateur_message.verifier(request)
+        enveloppe = await self._manager.context.validateur_message.verifier(request)
         user_id = enveloppe.get_user_id
 
         parametres = json.loads(request['contenu'])
@@ -273,7 +274,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         except Exception:
             self.__logger.exception('Mapping error')
             # Override the response
-            return self.etat.formatteur_message.signer_message(
+            return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE, {'ok': False, 'err': 'Invalid mapping file'})[0]
 
         return response
@@ -281,14 +282,14 @@ class MappedSocketIoHandler(SocketIoHandler):
     async def register(self, _sid: str, message: dict):
 
         nom_usager = message['nomUsager']
-        idmg = self.etat.clecertificat.enveloppe.idmg
+        idmg = self._manager.context.signing_key.enveloppe.idmg
 
         # Verifier CSR
         try:
             csr = EnveloppeCsr.from_str(message['csr'])  # Note : valide le CSR, lance exception si erreur
         except Exception:
             reponse = {'ok': False, 'err': 'Signature CSR invalide'}
-            reponse, correlation_id = self.etat.formatteur_message.signer_message(Constantes.KIND_REPONSE, reponse)
+            reponse, correlation_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, reponse)
             return reponse
 
         # Calculer fingerprintPk
@@ -306,7 +307,7 @@ class MappedSocketIoHandler(SocketIoHandler):
             'fingerprint_pk': fingperint_pk
         }
 
-        producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+        producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
         resultat = await producer.executer_commande(
             commande,
             domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES, action='inscrireUsager',
@@ -354,7 +355,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         except KeyError:
             pass  # Pas de challenge de delegation
 
-        reponse_usager, correlation = self.etat.formatteur_message.signer_message(
+        reponse_usager, correlation = self._manager.context.formatteur.signer_message(
             Constantes.KIND_REPONSE, reponse_usager)
 
         return reponse_usager
@@ -364,7 +365,7 @@ class MappedSocketIoHandler(SocketIoHandler):
             sid, message, Constantes.DOMAINE_CORE_TOPOLOGIE, 'listeApplicationsDeployees', Constantes.SECURITE_PRIVE)
 
         # Ajouter un message signe localement pour prouver l'identite du serveur (instance_id)
-        info_serveur = self.etat.formatteur_message.signer_message(
+        info_serveur = self._manager.context.formatteur.signer_message(
             Constantes.KIND_REPONSE,
             dict(),
             domaine='maitredescomptes',
@@ -381,7 +382,7 @@ class MappedSocketIoHandler(SocketIoHandler):
                                               'listeUserappsDeployees', Constantes.SECURITE_PRIVE)
 
         # Ajouter un message signe localement pour prouver l'identite du serveur (instance_id)
-        info_serveur = self.etat.formatteur_message.signer_message(
+        info_serveur = self._manager.context.formatteur.signer_message(
             Constantes.KIND_REPONSE,
             dict(),
             domaine='maitredescomptes',
@@ -399,7 +400,7 @@ class MappedSocketIoHandler(SocketIoHandler):
             'csr': message['csr'],
         }
 
-        producer = await asyncio.wait_for(self.etat.producer_wait(), timeout=0.5)
+        producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
         result = await producer.executer_commande(
             command,
             domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
