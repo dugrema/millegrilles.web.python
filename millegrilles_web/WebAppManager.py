@@ -2,7 +2,6 @@ import logging
 
 from typing import Callable, Awaitable, Optional
 
-from millegrilles_messages.bus.PikaQueue import MilleGrillesPikaQueueConsumer
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
 from millegrilles_messages.structs.Filehost import Filehost
@@ -20,27 +19,9 @@ class WebAppManager:
 
         self.__filehost_listeners: list[Callable[[Optional[Filehost]], Awaitable[None]]] = list()
 
-        self.__subscription_callback: Optional[Callable[[MessageWrapper], Awaitable[None]]] = None
-        self.__get_subscription_queue: Optional[Callable[[], MilleGrillesPikaQueueConsumer]] = None
-        self.__evict_user_callback: Optional[Callable[[str], Awaitable[None]]] = None
-
-    def setup(self,
-              subscription_callback: Callable[[MessageWrapper], Awaitable[None]],
-              get_subscription_queue: Callable[[], MilleGrillesPikaQueueConsumer],
-              evict_user_callback: Callable[[str], Awaitable[None]]):
-        self.__subscription_callback = subscription_callback
-        self.__get_subscription_queue = get_subscription_queue
-        self.__evict_user_callback = evict_user_callback
-
     @property
     def context(self) -> WebAppContext:
         return self.__context
-
-    async def subscription_callback_handler(self, message: MessageWrapper):
-        await self.__subscription_callback(message)
-
-    def get_subcription_queue(self) -> MilleGrillesPikaQueueConsumer:
-        return self.__get_subscription_queue()
 
     def add_filehost_listener(self, listener: Callable[[Optional[Filehost]], Awaitable[None]]):
         self.__filehost_listeners.append(listener)
@@ -78,11 +59,6 @@ class WebAppManager:
     @property
     def application_path(self):
         return self.__context.configuration.application_path or f'/{self.app_name}'
-
-    async def evict_user(self, message: MessageWrapper):
-        user_id = message.parsed['userId']
-        self.__logger.info("evict_user Evict user %s", user_id)
-        await self.__evict_user_callback(user_id)
 
     async def update_keymaster_certificate(self, message: MessageWrapper):
         certificat = message.certificat
