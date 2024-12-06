@@ -321,13 +321,12 @@ class SocketIoHandler:
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
                 self.__logger.info("Stream to correlation_id %s", correlation_id)
-                raise NotImplementedError('todo')
-                # await producer.ajouter_correlation_callback(correlation_id, callback)
+                await producer.add_streaming_correlation(correlation_id, callback)
 
-                # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                # return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer,
-                #                                      enveloppe, nowait=True, timeout=timeout,
-                #                                      role_check=role_check, domain_check=domain_check)
+                # Emettre la requete nowait - la reponse va etre acheminee via correlation
+                return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer,
+                                                     enveloppe, nowait=True, timeout=timeout,
+                                                     role_check=role_check, domain_check=domain_check)
             else:
                 return await self.__executer_message('requete', sid, requete, domaine, action, exchange,
                                                      producer, enveloppe, timeout=timeout,
@@ -349,12 +348,11 @@ class SocketIoHandler:
                     message_parsed = message.original
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
-                raise NotImplementedError('todo')
-                # await producer.ajouter_correlation_callback(correlation_id, callback)
+                await producer.add_streaming_correlation(correlation_id, callback)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                #return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer,
-                #                                     enveloppe, nowait=True, role_check=role_check, domain_check=domain_check)
+                return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer,
+                                                    enveloppe, nowait=True, role_check=role_check, domain_check=domain_check)
             else:
                 return await self.__executer_message('commande', sid, commande, domaine, action, exchange,
                                                      producer, enveloppe, nowait=nowait, timeout=timeout,
