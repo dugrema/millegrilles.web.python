@@ -4,7 +4,7 @@ ARG VBUILD=2024.9.0
 
 ENV CERT_PATH=/run/secrets/cert.pem \
     KEY_PATH=/run/secrets/key.pem \
-    CA_PATH=/run/secrets/pki.millegrille.cert \
+    CA_PATH=/run/secrets/millegrille.cert.pem \
     MQ_HOSTNAME=mq \
     MQ_PORT=5673 \
     REDIS_HOSTNAME=redis \
