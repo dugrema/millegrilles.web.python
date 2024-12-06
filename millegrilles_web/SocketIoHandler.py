@@ -324,7 +324,7 @@ class SocketIoHandler:
 
                 # Emettre la requete nowait - la reponse va etre acheminee via correlation
                 return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer,
-                                                     enveloppe, nowait=True, timeout=timeout,
+                                                     enveloppe, nowait=True, correlation_id=correlation_id, timeout=timeout,
                                                      role_check=role_check, domain_check=domain_check)
             else:
                 return await self.__executer_message('requete', sid, requete, domaine, action, exchange,
@@ -351,14 +351,14 @@ class SocketIoHandler:
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
                 return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer,
-                                                    enveloppe, nowait=True, role_check=role_check, domain_check=domain_check)
+                                                     enveloppe, nowait=True, correlation_id=correlation_id, role_check=role_check, domain_check=domain_check)
             else:
                 return await self.__executer_message('commande', sid, commande, domaine, action, exchange,
                                                      producer, enveloppe, nowait=nowait, timeout=timeout,
                                                      role_check=role_check, domain_check=domain_check)
 
     async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str,
-                                 exchange: str, producer=None, enveloppe=None, nowait=False, timeout=None,
+                                 exchange: str, producer=None, enveloppe=None, nowait=False, timeout=None, correlation_id: Optional[str] = None,
                                  role_check: Optional[str] = None, domain_check: Optional[Union[bool, str, list]] = None):
         async with self._sio.session(sid) as session:
             try:
@@ -384,12 +384,12 @@ class SocketIoHandler:
 
         if type_message == 'requete':
             reponse = await producer.request(
-                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True,
-                timeout=timeout, role_check=role_check, domain_check=domain_check)
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, correlation_id=correlation_id,
+                noformat=True, nowait=nowait, timeout=timeout, role_check=role_check, domain_check=domain_check)
         elif type_message == 'commande':
             reponse = await producer.command(
-                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True,
-                nowait=nowait, timeout=timeout, role_check=role_check, domain_check=domain_check)
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, correlation_id=correlation_id,
+                noformat=True, nowait=nowait, timeout=timeout, role_check=role_check, domain_check=domain_check)
         else:
             raise ValueError('Type de message non supporte : %s' % type_message)
 
