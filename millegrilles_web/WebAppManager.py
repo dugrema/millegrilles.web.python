@@ -2,6 +2,7 @@ import logging
 
 from typing import Callable, Awaitable, Optional
 
+from millegrilles_messages.bus.PikaQueue import MilleGrillesPikaQueueConsumer
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
 from millegrilles_messages.structs.Filehost import Filehost
@@ -66,3 +67,9 @@ class WebAppManager:
             fingerprint = certificat.fingerprint
             pem = certificat.chaine_pem()
             self.__context.update_keymaster_certificate(fingerprint, pem)
+
+    def get_subcription_queue(self) -> MilleGrillesPikaQueueConsumer:
+        raise NotImplementedError('not available')
+
+    async def evict_user(self, message: MessageWrapper):
+        raise NotImplementedError('not available')

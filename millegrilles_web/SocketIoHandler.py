@@ -28,7 +28,6 @@ class SocketIoHandler:
         self._subscription_handler = subscription_handler
 
         self._sio = socketio.AsyncServer(async_mode='aiohttp', always_connect=always_connect, cors_allowed_origins='*')
-        self._certificats_maitredescles = dict()
 
         self._semaphore_requetes = asyncio.BoundedSemaphore(value=10)
         self._semaphore_commandes = asyncio.BoundedSemaphore(value=5)
@@ -82,7 +81,7 @@ class SocketIoHandler:
         while self._manager.context.stopping is False:
 
             # Charger le certificat de maitre des cles
-            if len(self._certificats_maitredescles) == 0:
+            if len(self._manager.context.keymaster_certificates) == 0:
                 self.__logger.debug("Tenter de charger au moins un certificat de maitre des cles")
                 try:
                     await self.charger_maitredescles()
@@ -272,7 +271,7 @@ class SocketIoHandler:
 
     async def get_certificats_maitredescles(self, sid: str):
         async with self._semaphore_requetes:
-            pems = [p['pem'] for p in self._certificats_maitredescles.values()]
+            pems = self._manager.context.keymaster_certificates
             return pems
 
     async def get_info_idmg(self, sid: str, params: dict):
