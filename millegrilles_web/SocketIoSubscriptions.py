@@ -230,13 +230,12 @@ class SocketIoSubscriptions:
     def get_participants(self, room: str):
         return self.__sio.manager.get_participants('/', room)
 
-    async def evict_usager(self, message: MessageWrapper):
-        user_id = message.parsed['userId']
-        self.__logger.info("evict_usager Evist user %s", user_id)
+    async def evict_user(self, user_id: str):
+        self.__logger.info("evict_user Evict user %s", user_id)
 
         # Find SIDs associated to the user_id
         for (sid, _) in self.get_participants('user.%s' % user_id):
-            self.__logger.debug("evict_usager %s SID:%s", user_id, sid)
+            self.__logger.debug("evict_user %s SID:%s", user_id, sid)
             async with self.__sio.session(sid) as session:
                 session.clear()
 

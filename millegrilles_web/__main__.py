@@ -68,7 +68,11 @@ async def wiring(context: MappedWebAppContext) -> list[Awaitable]:
 
     # Setup, injecting additional dependencies
     context.bus_connector = bus_connector
-    manager.setup(socketio_subscriptions_handler.handle_subscription_message, bus_handler.get_subscription_queue)
+    manager.setup(
+        socketio_subscriptions_handler.handle_subscription_message,
+        bus_handler.get_subscription_queue,
+        socketio_subscriptions_handler.evict_user,
+    )
     await web_server.setup()
     await socketio_handler.setup(web_server.web_app)
 

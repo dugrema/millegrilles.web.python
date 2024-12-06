@@ -254,8 +254,7 @@ class SocketIoHandler:
                 user_id = None
 
             try:
-                raise NotImplementedError('todo')
-                # return await self._subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
+                return await self._subscription_handler.unsubscribe(sid, user_id, routing_keys, exchanges)
             except Exception:
                 self.__logger.exception("subscribe Erreur unsubscribe")
                 return {'ok': False}
@@ -306,7 +305,9 @@ class SocketIoHandler:
             reponse_signee, message_id = self._manager.context.formatteur.signer_message(Constantes.KIND_REPONSE, reponse)
             return reponse_signee
 
-    async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, stream=False):
+    async def executer_requete(self, sid: str, requete: dict, domaine: str, action: str,
+                               exchange: Optional[str] = None, producer=None, enveloppe=None, stream=False, timeout=None,
+                               role_check: Optional[str] = None, domain_check: Optional[Union[bool, str, list]] = None):
         async with self._semaphore_requetes:
             if stream is True:
                 if producer is None:
@@ -324,11 +325,18 @@ class SocketIoHandler:
                 # await producer.ajouter_correlation_callback(correlation_id, callback)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                # return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe, nowait=True)
+                # return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer,
+                #                                      enveloppe, nowait=True, timeout=timeout,
+                #                                      role_check=role_check, domain_check=domain_check)
             else:
-                return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer, enveloppe)
+                return await self.__executer_message('requete', sid, requete, domaine, action, exchange,
+                                                     producer, enveloppe, timeout=timeout,
+                                                     role_check=role_check, domain_check=domain_check)
 
-    async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str, exchange: Optional[str] = None, producer=None, enveloppe=None, nowait=False, stream=False):
+    async def executer_commande(self, sid: str, commande: dict, domaine: str, action: str,
+                                exchange: Optional[str] = None, producer=None, enveloppe=None, nowait=False,
+                                stream=False, timeout=None,
+                                role_check: Optional[str] = None, domain_check: Optional[Union[bool, str, list]] = None):
         async with self._semaphore_commandes:
             if stream is True:
                 if producer is None:
@@ -345,12 +353,16 @@ class SocketIoHandler:
                 # await producer.ajouter_correlation_callback(correlation_id, callback)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
-                #return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=True)
+                #return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer,
+                #                                     enveloppe, nowait=True, role_check=role_check, domain_check=domain_check)
             else:
-                return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer, enveloppe, nowait=nowait)
+                return await self.__executer_message('commande', sid, commande, domaine, action, exchange,
+                                                     producer, enveloppe, nowait=nowait, timeout=timeout,
+                                                     role_check=role_check, domain_check=domain_check)
 
     async def __executer_message(self, type_message: str, sid: str, message: dict, domaine_verif: str, action_verif: str,
-                                 exchange: str, producer=None, enveloppe=None, nowait=False):
+                                 exchange: str, producer=None, enveloppe=None, nowait=False, timeout=None,
+                                 role_check: Optional[str] = None, domain_check: Optional[Union[bool, str, list]] = None):
         async with self._sio.session(sid) as session:
             try:
                 enveloppe = await self.authentifier_message(session, message, enveloppe)
@@ -369,15 +381,18 @@ class SocketIoHandler:
         if action != action_verif or domaine != domaine_verif:
             return self._manager.context.formatteur.signer_message(
                 Constantes.KIND_REPONSE,
-                {'ok': False, 'err': 'Routage mismatch domaine: %s, action: %s (doit etre domaine %s action %s)' % (domaine, action, domaine_verif, action_verif)}
+                {'ok': False, 'err': 'Routage mismatch domaine: %s, action: %s (doit etre domaine %s action %s)' % (
+                    domaine, action, domaine_verif, action_verif)}
             )[0]
 
         if type_message == 'requete':
             reponse = await producer.request(
-                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True)
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True,
+                timeout=timeout, role_check=role_check, domain_check=domain_check)
         elif type_message == 'commande':
             reponse = await producer.command(
-                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True, nowait=nowait)
+                message, domain=domaine, action=action, partition=partition, exchange=exchange, noformat=True,
+                nowait=nowait, timeout=timeout, role_check=role_check, domain_check=domain_check)
         else:
             raise ValueError('Type de message non supporte : %s' % type_message)
 
@@ -385,25 +400,6 @@ class SocketIoHandler:
             return reponse.original
         except AttributeError:
             return None
-
-    # async def ajouter_sid_room(self, sid: str, room: str):
-    #     self.__logger.debug("Ajout sid %s a room %s" % (sid, room))
-    #     return await self._sio.enter_room(sid, room)
-    #
-    # async def retirer_sid_room(self, sid: str, room: str):
-    #     self.__logger.debug("Retrait sid %s de room %s" % (sid, room))
-    #     return await self._sio.leave_room(sid, room)
-    #
-    # async def emettre_message_room(self, event: str, data: dict, room: str):
-    #     return await self._sio.emit(event, data, room=room)
-    #
-    # @property
-    # def rooms(self):
-    #     # return self._sio.manager.rooms
-    #     return self._sio.manager.rooms
-    #
-    # def get_participants(self, room: str):
-    #     return self._sio.manager.get_participants('/', room)
 
 
 class ErreurAuthentificationMessage(Exception):

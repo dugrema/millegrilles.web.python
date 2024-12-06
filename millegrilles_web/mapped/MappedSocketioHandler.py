@@ -108,6 +108,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         routage = message['routage']
         action = routage['action']
         domain = routage.get('domaine') or default_domain
+        timeout = routage.get('timeout') or Constantes.CONST_WAIT_REPLY_DEFAULT
 
         # Special case - check if the exchange is being altered
         try:
@@ -126,11 +127,18 @@ class MappedSocketIoHandler(SocketIoHandler):
                     return {'ok': False, 'code': 403, 'err': 'Access denied, request %s/%s not allowed' % (domain, action)}
 
             exchange = request_mapping.get('exchange') or default_exchange
+            roles_check = request_mapping.get('roles')
+            if domain == 'global':
+                domains_check = False  # Special case, any domain can reply
+            else:
+                domains_check = request_mapping.get('domaines')
+
             if destination_exchange is not None:
                 if destination_exchange in request_mapping.get('exchanges'):
                     exchange = destination_exchange
 
-            return await self.executer_requete(sid, message, domain, action, exchange)
+            return await self.executer_requete(sid, message, domain, action, exchange, timeout=timeout,
+                                               role_check=roles_check, domain_check=domains_check)
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             try:
                 command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
@@ -146,7 +154,14 @@ class MappedSocketIoHandler(SocketIoHandler):
                     exchange = destination_exchange
 
             nowait = command_mapping.get('nowait')
-            return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait)
+            roles_check = command_mapping.get('roles')
+            if domain == 'global':
+                domains_check = False  # Special case, any domain can reply
+            else:
+                domains_check = command_mapping.get('domaines')
+
+            return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, timeout=timeout,
+                                                role_check=roles_check, domain_check=domains_check)
         else:
             raise Exception('Unsupported message kind')
 
@@ -172,7 +187,13 @@ class MappedSocketIoHandler(SocketIoHandler):
                 return self._manager.context.formatteur.signer_message(
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = request_mapping.get('exchange') or default_exchange
-            await self.executer_requete(sid, message, domain, action, exchange, stream=True)
+            roles_check = request_mapping.get('roles')
+            if domain == 'global':
+                domains_check = False  # Special case, any domain can reply
+            else:
+                domains_check = request_mapping.get('domaines')
+            await self.executer_requete(sid, message, domain, action, exchange, stream=True,
+                                        role_check=roles_check, domain_check=domains_check)
             return False
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
@@ -181,7 +202,13 @@ class MappedSocketIoHandler(SocketIoHandler):
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = command_mapping.get('exchange') or default_exchange
             nowait = command_mapping.get('nowait')
-            result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True)
+            roles_check = command_mapping.get('roles')
+            if domain == 'global':
+                domains_check = False  # Special case, any domain can reply
+            else:
+                domains_check = command_mapping.get('domaines')
+            result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True,
+                                                  role_check=roles_check, domain_check=domains_check)
             self.__logger.debug("!! execution command streaming : %s" % result)
             return False
         else:
@@ -308,9 +335,9 @@ class MappedSocketIoHandler(SocketIoHandler):
         }
 
         producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
-        resultat = await producer.executer_commande(
+        resultat = await producer.command(
             commande,
-            domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES, action='inscrireUsager',
+            domain=Constantes.DOMAINE_CORE_MAITREDESCOMPTES, action='inscrireUsager',
             exchange=Constantes.SECURITE_PRIVE)
 
         reponse_parsed = resultat.parsed
@@ -401,9 +428,9 @@ class MappedSocketIoHandler(SocketIoHandler):
         }
 
         producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
-        result = await producer.executer_commande(
+        result = await producer.command(
             command,
-            domaine=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
+            domain=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
             action='ajouterCsrRecovery',
             exchange=Constantes.SECURITE_PRIVE)
 
