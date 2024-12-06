@@ -209,7 +209,7 @@ class MappedSocketIoHandler(SocketIoHandler):
                 domains_check = command_mapping.get('domaines')
             result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True,
                                                   role_check=roles_check, domain_check=domains_check)
-            self.__logger.debug("!! execution command streaming : %s" % result)
+            self.__logger.debug("started streaming command : %s", result)
             return False
         else:
             raise Exception('Unsupported message kind')
