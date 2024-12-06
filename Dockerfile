@@ -1,10 +1,10 @@
-FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2024.9.71
+FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2024.9.82
 
-ARG VBUILD=2024.8.0
+ARG VBUILD=2024.9.0
 
-ENV CERT_PEM=/run/secrets/cert.pem \
-    KEY_PEM=/run/secrets/key.pem \
-    CA_PEM=/run/secrets/pki.millegrille.cert \
+ENV CERT_PATH=/run/secrets/cert.pem \
+    KEY_PATH=/run/secrets/key.pem \
+    CA_PATH=/run/secrets/pki.millegrille.cert \
     MQ_HOSTNAME=mq \
     MQ_PORT=5673 \
     REDIS_HOSTNAME=redis \
