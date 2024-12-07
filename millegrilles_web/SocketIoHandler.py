@@ -296,8 +296,11 @@ class SocketIoHandler:
         async with self._semaphore_requetes:
             async with self._sio.session(sid) as session:
                 if session.get('auth_verifie'):
-                    filehost_info = self._manager.context.filehost
-                    reponse = {'ok': True, 'filehost': filehost_info.to_dict()}
+                    try:
+                        filehost_info = self._manager.context.filehost
+                        reponse = {'ok': True, 'filehost': filehost_info.export_for_client()}
+                    except AttributeError:
+                        reponse = {'ok': False, 'err': 'No filehost available'}
                 else:
                     reponse = {'ok': False, 'err': 'Not authenticated'}
 

@@ -203,12 +203,12 @@ class SocketIoSubscriptions:
 
     async def ajouter_rk(self, routing_key: str, exchange: str):
         """ Ajouter une routing_key sur la Q du consumer dans MQ """
-        subscription_queue = self.__manager.get_subcription_queue()
+        subscription_queue = self.__manager.get_subscription_queue()
         await subscription_queue.add_bind_routing_key(RoutingKey(exchange, routing_key))
 
     async def retirer_rk(self, routing_key: str, exchange: str):
         """ Retirer une routing_key de la Q du consumer dans MQ """
-        subscription_queue = self.__manager.get_subcription_queue()
+        subscription_queue = self.__manager.get_subscription_queue()
         await subscription_queue.remove_unbind_routing_key(RoutingKey(exchange, routing_key))
 
     async def add_sid_room(self, sid: str, room: str):

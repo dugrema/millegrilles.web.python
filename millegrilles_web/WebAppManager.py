@@ -27,6 +27,9 @@ class WebAppManager:
     def add_filehost_listener(self, listener: Callable[[Optional[Filehost]], Awaitable[None]]):
         self.__filehost_listeners.append(listener)
 
+    async def run(self):
+        await self.__reload_filehost_thread()
+
     async def __reload_filehost_thread(self):
         while self.__context.stopping is False:
             try:
@@ -68,7 +71,7 @@ class WebAppManager:
             pem = certificat.chaine_pem()
             self.__context.update_keymaster_certificate(fingerprint, pem)
 
-    def get_subcription_queue(self) -> MilleGrillesPikaQueueConsumer:
+    def get_subscription_queue(self) -> MilleGrillesPikaQueueConsumer:
         raise NotImplementedError('not available')
 
     async def evict_user(self, message: MessageWrapper):

@@ -306,6 +306,14 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         return response
 
+    async def disconnect(self, sid: str):
+        try:
+            # Remove mapping file for session
+            del self.__mapping_files[sid]
+        except KeyError:
+            pass
+        await super().disconnect(sid)
+
     async def register(self, _sid: str, message: dict):
 
         nom_usager = message['nomUsager']

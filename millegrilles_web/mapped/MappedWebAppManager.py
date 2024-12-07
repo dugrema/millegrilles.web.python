@@ -23,17 +23,17 @@ class MappedWebAppManager(WebAppManager):
         return '/millegrilles'
 
     def setup(self,
-              subscription_callback: Callable[[MessageWrapper], Awaitable[None]],
+              # subscription_callback: Callable[[MessageWrapper], Awaitable[None]],
               get_subscription_queue: Callable[[], MilleGrillesPikaQueueConsumer],
               evict_user_callback: Callable[[str], Awaitable[None]]):
-        self.__subscription_callback = subscription_callback
+        # self.__subscription_callback = subscription_callback
         self.__get_subscription_queue = get_subscription_queue
         self.__evict_user_callback = evict_user_callback
 
-    async def subscription_callback_handler(self, message: MessageWrapper):
-        await self.__subscription_callback(message)
+    # async def subscription_callback_handler(self, message: MessageWrapper):
+    #     await self.__subscription_callback(message)
 
-    def get_subcription_queue(self) -> MilleGrillesPikaQueueConsumer:
+    def get_subscription_queue(self) -> MilleGrillesPikaQueueConsumer:
         return self.__get_subscription_queue()
 
     async def evict_user(self, message: MessageWrapper):
