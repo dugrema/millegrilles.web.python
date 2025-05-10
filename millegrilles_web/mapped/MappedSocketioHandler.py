@@ -108,7 +108,7 @@ class MappedSocketIoHandler(SocketIoHandler):
         routage = message['routage']
         action = routage['action']
         domain = routage.get('domaine') or default_domain
-        timeout = routage.get('timeout') or Constantes.CONST_WAIT_REPLY_DEFAULT
+        timeout = Constantes.CONST_WAIT_REPLY_DEFAULT
 
         # Special case - check if the exchange is being altered
         try:
@@ -128,6 +128,7 @@ class MappedSocketIoHandler(SocketIoHandler):
 
             exchange = request_mapping.get('exchange') or default_exchange
             roles_check = request_mapping.get('roles')
+            timeout = request_mapping.get('timeout') or timeout
             if domain == 'global':
                 domains_check = False  # Special case, any domain can reply
             else:
@@ -149,6 +150,7 @@ class MappedSocketIoHandler(SocketIoHandler):
                     return {'ok': False, 'code': 403, 'err': 'Access denied, command %s/%s not allowed' % (domain, action)}
 
             exchange = command_mapping.get('exchange') or default_exchange
+            timeout = command_mapping.get('timeout') or timeout
             if destination_exchange is not None:
                 if destination_exchange in command_mapping.get('exchanges'):
                     exchange = destination_exchange
