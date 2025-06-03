@@ -1,4 +1,4 @@
-FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2025.3.100 as stage1
+FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2025.3.102 as stage1
 
 ENV CERT_PATH=/run/secrets/cert.pem \
     KEY_PATH=/run/secrets/key.pem \
