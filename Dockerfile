@@ -11,7 +11,7 @@ ENV CERT_PATH=/run/secrets/cert.pem \
 
 # Install pip requirements
 COPY requirements.txt $BUILD_FOLDER/requirements.txt
-RUN pip3 install --no-cache-dir -r $BUILD_FOLDER/requirements.txt && \
+RUN pip3 install --no-cache-dir -r $BUILD_FOLDER/requirements.txt
 
 FROM stage1
 
