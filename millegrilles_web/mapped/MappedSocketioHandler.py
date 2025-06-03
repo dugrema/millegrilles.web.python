@@ -190,11 +190,12 @@ class MappedSocketIoHandler(SocketIoHandler):
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = request_mapping.get('exchange') or default_exchange
             roles_check = request_mapping.get('roles')
+            timeout = request_mapping.get('timeout')
             if domain == 'global':
                 domains_check = False  # Special case, any domain can reply
             else:
                 domains_check = request_mapping.get('domaines')
-            await self.executer_requete(sid, message, domain, action, exchange, stream=True,
+            await self.executer_requete(sid, message, domain, action, exchange, stream=True, timeout=timeout,
                                         role_check=roles_check, domain_check=domains_check)
             return False
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
@@ -204,12 +205,13 @@ class MappedSocketIoHandler(SocketIoHandler):
                     Constantes.KIND_REPONSE, {'ok': False, 'err': 'Streaming not supported'})[0]
             exchange = command_mapping.get('exchange') or default_exchange
             nowait = command_mapping.get('nowait')
+            timeout = command_mapping.get('timeout')
             roles_check = command_mapping.get('roles')
             if domain == 'global':
                 domains_check = False  # Special case, any domain can reply
             else:
                 domains_check = command_mapping.get('domaines')
-            result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, stream=True,
+            result = await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, timeout=timeout, stream=True,
                                                   role_check=roles_check, domain_check=domains_check)
             self.__logger.debug("started streaming command : %s", result)
             return False

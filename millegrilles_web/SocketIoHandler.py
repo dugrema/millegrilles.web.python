@@ -323,7 +323,7 @@ class SocketIoHandler:
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
                 self.__logger.info("Stream to correlation_id %s", correlation_id)
-                await producer.add_streaming_correlation(correlation_id, callback)
+                await producer.add_streaming_correlation(correlation_id, callback, timeout=timeout)
 
                 # Emettre la requete nowait - la reponse va etre acheminee via correlation
                 return await self.__executer_message('requete', sid, requete, domaine, action, exchange, producer,
@@ -350,7 +350,7 @@ class SocketIoHandler:
                     message_parsed = message.original
                     await self._sio.emit(f'stream_{cb_correlation_id}', message_parsed)
 
-                await producer.add_streaming_correlation(correlation_id, callback)
+                await producer.add_streaming_correlation(correlation_id, callback, timeout=timeout)
 
                 # Emettre la commande nowait - la reponse va etre acheminee via correlation
                 return await self.__executer_message('commande', sid, commande, domaine, action, exchange, producer,
