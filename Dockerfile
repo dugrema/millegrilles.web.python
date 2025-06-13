@@ -1,4 +1,4 @@
-FROM registry.millegrilles.com/millegrilles_messages_python:2025.4.103 as stage1
+FROM registry.millegrilles.com/millegrilles/messages_python:2025.4.104 as stage1
 
 ENV CERT_PATH=/run/secrets/cert.pem \
     KEY_PATH=/run/secrets/key.pem \
