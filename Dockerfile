@@ -1,4 +1,4 @@
-FROM docker.maple.maceroc.com:5000/millegrilles_messages_python:2025.3.102 as stage1
+FROM registry.millegrilles.com/millegrilles_messages_python:2025.4.103 as stage1
 
 ENV CERT_PATH=/run/secrets/cert.pem \
     KEY_PATH=/run/secrets/key.pem \
@@ -15,7 +15,7 @@ RUN pip3 install --no-cache-dir -r $BUILD_FOLDER/requirements.txt
 
 FROM stage1
 
-ARG VBUILD=2024.9.0
+ARG VBUILD=2025.4.0
 
 EXPOSE 80 443
 
