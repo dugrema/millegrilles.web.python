@@ -42,6 +42,8 @@ class MappedSocketIoHandler(SocketIoHandler):
         self._sio.on('request_userapps_list', handler=self.request_userapps_list)
         self._sio.on('route_message', handler=self.handle_routed_message)
         self._sio.on('route_message_stream_response', handler=self.handle_routed_message_stream_response)
+        self._sio.on('command_new_totp_secret', handler=self.command_new_totp_secret)
+        self._sio.on('command_register_totp', handler=self.command_register_totp)
 
         # Private listeners
         self._sio.on('subscribe', handler=self.handle_subscribe)
@@ -445,6 +447,44 @@ class MappedSocketIoHandler(SocketIoHandler):
             domain=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
             action='ajouterCsrRecovery',
             exchange=Constantes.SECURITE_PRIVE)
+
+        parsed_response = result.parsed
+        response = parsed_response['__original']
+        return response
+
+    async def command_new_totp_secret(self, sid: str, command: dict):
+        try:
+            _mapping = self.__mapping_files[sid]
+        except KeyError:
+            return self._manager.context.formatteur.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+
+        producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
+        encrypted_response = await producer.command(
+            command,
+            domain=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
+            action='generateOtp',
+            exchange=Constantes.SECURITE_PUBLIC,
+            noformat=True)
+
+        # parsed_response = result.parsed
+        # response = parsed_response['__original']
+        return encrypted_response.original
+
+    async def command_register_totp(self, sid: str, command: dict):
+        try:
+            _mapping = self.__mapping_files[sid]
+        except KeyError:
+            return self._manager.context.formatteur.signer_message(
+                Constantes.KIND_REPONSE, {'ok': False, 'err': 'Session action mapping not initialized'})[0]
+
+        producer = await asyncio.wait_for(self._manager.context.get_producer(), timeout=0.5)
+        result = await producer.command(
+            command,
+            domain=Constantes.DOMAINE_CORE_MAITREDESCOMPTES,
+            action='registerOtp',
+            exchange=Constantes.SECURITE_PUBLIC,
+            noformat=True)
 
         parsed_response = result.parsed
         response = parsed_response['__original']
