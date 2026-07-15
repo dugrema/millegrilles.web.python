@@ -6,7 +6,7 @@ ENV CERT_PATH=/run/secrets/key.pem \
     MQ_HOSTNAME=mq \
     MQ_PORT=5673 \
     REDIS_HOSTNAME=redis \
-    REDIS_PASSWORD_PATH=/var/run/secrets/passwd.redis.txt \
+    REDIS_PASSWORD_PATH=/run/secrets/redis.txt \
     WEB_PORT=1443
 
 # Install pip requirements
