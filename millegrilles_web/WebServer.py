@@ -122,7 +122,7 @@ class WebServer:
         port = self.__manager.context.configuration.port
         context = self.__manager.context
         ssl_context = context.web_ssl_context
-        site = web.TCPSite(runner, '::', port, ssl_context=ssl_context)
+        site = web.TCPSite(runner, None, port, ssl_context=ssl_context)
 
         try:
             await site.start()
