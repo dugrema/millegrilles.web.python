@@ -1,7 +1,6 @@
-FROM registry.millegrilles.com/millegrilles/messages_python:2026.3.5 as stage1
+FROM registry.millegrilles.com/millegrilles/messages_python:2026.4.12 as stage1
 
-ENV CERT_PATH=/run/secrets/key.pem \
-    KEY_PATH=/run/secrets/key.pem \
+ENV KEY_PATH=/run/secrets/key_cert.pem \
     CA_PATH=/run/secrets/millegrille.cert.pem \
     MQ_HOSTNAME=mq \
     MQ_PORT=5673 \
