@@ -40,14 +40,7 @@ class WebAppManager:
                 await self.__context.wait(30)
 
     async def reload_filehost_configuration(self):
-        producer = await self.__context.get_producer()
-        response = await producer.request(
-            dict(), 'CoreTopologie', 'getFilehostForInstance', exchange="1.public")
-
         try:
-            # filehost_response = response.parsed
-            # filehost_dict = filehost_response['filehost']
-            # filehost = Filehost.load_from_dict(filehost_dict)
             filehost = await load_filehost_configuration(self.__context)
             self.__context.filehost = filehost
         except:
