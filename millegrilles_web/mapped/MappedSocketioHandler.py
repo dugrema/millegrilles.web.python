@@ -142,8 +142,14 @@ class MappedSocketIoHandler(SocketIoHandler):
                 if destination_exchange in request_mapping.get('exchanges'):
                     exchange = destination_exchange
 
-            return await self.executer_requete(sid, message, domain, action, exchange, timeout=timeout,
-                                               role_check=roles_check, domain_check=domains_check)
+            try:
+                return await self.executer_requete(sid, message, domain, action, exchange, timeout=timeout,
+                                                   role_check=roles_check, domain_check=domains_check)
+            except *asyncio.CancelledError as e:
+                self.__logger.error(f"Async cancelled error on request: {e}")
+                pass
+            return {'ok': False, 'code': 500, 'err': 'Server error'}
+
         elif kind in [Constantes.KIND_COMMANDE, Constantes.KIND_COMMANDE_INTER_MILLEGRILLE]:
             try:
                 command_mapping = mapping[COMMANDS_DICT]['/'.join((domain, action))]
@@ -166,8 +172,13 @@ class MappedSocketIoHandler(SocketIoHandler):
             else:
                 domains_check = command_mapping.get('domaines')
 
-            return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, timeout=timeout,
-                                                role_check=roles_check, domain_check=domains_check)
+            try:
+                return await self.executer_commande(sid, message, domain, action, exchange, nowait=nowait, timeout=timeout,
+                                                    role_check=roles_check, domain_check=domains_check)
+            except *asyncio.CancelledError as e:
+                self.__logger.error(f"Async cancelled error on command: {e}")
+                pass
+            return {'ok': False, 'code': 500, 'err': 'Server error'}
         else:
             raise Exception('Unsupported message kind')
 
