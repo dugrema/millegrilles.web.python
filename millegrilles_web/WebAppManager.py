@@ -5,7 +5,7 @@ from typing import Callable, Awaitable, Optional
 from millegrilles_messages.bus.PikaQueue import MilleGrillesPikaQueueConsumer
 from millegrilles_messages.messages import Constantes
 from millegrilles_messages.messages.MessagesModule import MessageWrapper
-from millegrilles_messages.structs.Filehost import Filehost
+from millegrilles_messages.structs.Filehost import Filehost, load_filehost_configuration
 from millegrilles_web.Context import WebAppContext
 
 
@@ -45,9 +45,10 @@ class WebAppManager:
             dict(), 'CoreTopologie', 'getFilehostForInstance', exchange="1.public")
 
         try:
-            filehost_response = response.parsed
-            filehost_dict = filehost_response['filehost']
-            filehost = Filehost.load_from_dict(filehost_dict)
+            # filehost_response = response.parsed
+            # filehost_dict = filehost_response['filehost']
+            # filehost = Filehost.load_from_dict(filehost_dict)
+            filehost = await load_filehost_configuration(self.__context)
             self.__context.filehost = filehost
         except:
             self.__logger.exception("Error loading filehost")
