@@ -384,30 +384,30 @@ class MappedSocketIoHandler(SocketIoHandler):
 
         reponse_usager = dict()
 
-        try:
-            authentication_challenge = reponse_contenu['authentication_challenge']
-            passkey_authentication = reponse_contenu['passkey_authentication']
+        async with self._sio.session(sid) as session:
+            try:
+                authentication_challenge = reponse_contenu['authentication_challenge']
+                passkey_authentication = reponse_contenu['passkey_authentication']
 
-            # Conserver la passkey dans la session
-            async with self._sio.session(sid) as session:
+                # Conserver la passkey dans la session
                 session['authentication_challenge'] = authentication_challenge
                 session['passkey_authentication'] = passkey_authentication
 
-            reponse_usager['authentication_challenge'] = authentication_challenge
-        except KeyError:
-            pass  # Pas de challenge d'authentification
+                reponse_usager['authentication_challenge'] = authentication_challenge
+            except KeyError:
+                pass  # Pas de challenge d'authentification
 
-        try:
-            reponse_usager['registration_challenge'] = reponse_contenu['registration_challenge']
-        except KeyError:
-            pass  # Pas de challenge de registration
+            try:
+                reponse_usager['registration_challenge'] = reponse_contenu['registration_challenge']
+            except KeyError:
+                pass  # Pas de challenge de registration
 
-        try:
-            # Conserver le challenge de delegation
-            session['delegation_challenge'] = reponse_contenu['challenge']
-            reponse_usager['delegation_challenge'] = reponse_contenu['challenge']
-        except KeyError:
-            pass  # Pas de challenge de delegation
+            try:
+                # Conserver le challenge de delegation
+                session['delegation_challenge'] = reponse_contenu['challenge']
+                reponse_usager['delegation_challenge'] = reponse_contenu['challenge']
+            except KeyError:
+                pass  # Pas de challenge de delegation
 
         reponse_usager, correlation = self._manager.context.formatteur.signer_message(
             Constantes.KIND_REPONSE, reponse_usager)
