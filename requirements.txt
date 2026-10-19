@@ -6,4 +6,4 @@ python-socketio>=5.10,<6
 aiohttp-session==2.12.0
 
 --extra-index-url https://libs.millegrilles.com/python/dist
-millegrilles-messages>=2026.6.15
+millegrilles-messages>=2026.6.16
